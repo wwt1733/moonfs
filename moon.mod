@@ -1,13 +1,13 @@
 // moonfs — 纯 MoonBit 的只读文件系统镜像解析库
 // 文档：https://docs.moonbitlang.com/en/latest/toolchain/moon/module.html
 
-name = "WWT1733/moonfs"
+name = "wwt1733/moonfs"
 
 version = "0.1.0"
 
 readme = "README.md"
 
-repository = ""
+repository = "https://github.com/wwt1733/moonfs"
 
 license = "Apache-2.0"
 

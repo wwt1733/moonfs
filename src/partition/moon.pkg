@@ -1,5 +1,5 @@
 import {
-  "WWT1733/moonfs/src/binio",
-  "WWT1733/moonfs/src/block",
-  "WWT1733/moonfs/src/checksum",
+  "wwt1733/moonfs/src/binio",
+  "wwt1733/moonfs/src/block",
+  "wwt1733/moonfs/src/checksum",
 }

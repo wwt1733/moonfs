@@ -5,7 +5,7 @@
 - 项目名称：moonfs —— 纯 MoonBit 的只读文件系统镜像解析库（NTFS / ext4）
 - 参赛者：（待填）
 - 联系方式：（待填）
-- GitHub 仓库：https://github.com/WWT1733/moonfs
+- GitHub 仓库：https://github.com/wwt1733/moonfs
 - 项目方向：存储基础设施 / 文件系统解析
 - 项目性质：原创实现（依据公开规范编写，非移植）
 
