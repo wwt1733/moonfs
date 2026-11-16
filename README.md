@@ -18,7 +18,7 @@ moon add wwt1733/moonfs
 2. **需要特权。** 挂载镜像要求 root 或管理员权限，容器和 CI 环境里通常拿不到。
 3. **行为不统一。** 同一份解析代码在 native、JS、wasm 上的结果是否一致，没有统一答案。
 
-moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依赖 FFI，因此同一份代码可以在 native / JS / wasm / wasm-gc 四个后端上跑，并且可以在没有特权、没有挂载点的前提下直接读取镜像内容。
+moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依赖 FFI，因此同一份代码可以在 native / JS / wasm-gc 后端上跑，并且可以在没有特权、没有挂载点的前提下直接读取镜像内容。
 
 ## 当前进度
 
@@ -60,14 +60,14 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 ```moonbit
 // 读一块镜像的分区表
 let img = @block.Image::from_bytes(bytes)
-let parts = @partition.list(img)
+let parts = @partition.read(img)
 
 // 打开 NTFS 卷，读取卷信息
 let vol = @ntfs.Volume::open(img, parts[0].start_lba)
 println(vol.cluster_size())
 ```
 
-四个后端构建与测试：
+三个后端构建与测试：
 
 ```
 moon check
