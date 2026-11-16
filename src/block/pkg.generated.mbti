@@ -2,6 +2,7 @@
 package "WWT1733/moonfs/src/block"
 
 // Values
+pub fn reason_of(BlockError) -> String
 
 // Errors
 pub suberror BlockError {

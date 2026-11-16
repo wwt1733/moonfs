@@ -1,0 +1,37 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "WWT1733/moonfs/src/ntfs"
+
+import {
+  "WWT1733/moonfs/src/block",
+}
+
+// Values
+pub fn parse_boot_sector(Bytes) -> Volume raise NtfsError
+
+// Errors
+pub suberror NtfsError {
+  NotNtfs
+  BadGeometry(reason~ : String)
+  Corrupt(reason~ : String)
+  Io(reason~ : String)
+}
+
+// Types and methods
+pub(all) struct Volume {
+  bytes_per_sector : Int32
+  sectors_per_cluster : Int32
+  cluster_size : Int32
+  total_sectors : Int64
+  mft_lcn : Int64
+  mft_mirror_lcn : Int64
+  mft_record_size : Int32
+  index_record_size : Int32
+}
+pub fn Volume::cluster_offset(Self, Int64) -> Int64
+pub fn Volume::mft_offset(Self) -> Int64
+pub fn Volume::open(@block.Image, Int64) -> Self raise NtfsError
+pub fn Volume::size(Self) -> Int64
+
+// Type aliases
+
+// Traits

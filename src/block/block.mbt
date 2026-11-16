@@ -98,3 +98,19 @@ pub fn Image::read_sectors(
   }
   self.read(lba * self.sector_size.to_int64(), total.to_int())
 }
+
+///|
+/// 把读取错误转成一行描述，供上层拼接自己的错误信息。
+pub fn reason_of(err : BlockError) -> String {
+  match err {
+    OutOfBounds(offset~, need~, size~) =>
+      "need " +
+      need.to_string() +
+      " byte(s) at " +
+      offset.to_string() +
+      ", image is " +
+      size.to_string() +
+      " byte(s)"
+    InvalidSectorSize(size~) => "invalid sector size " + size.to_string()
+  }
+}

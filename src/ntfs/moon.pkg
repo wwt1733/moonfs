@@ -1,0 +1,4 @@
+import {
+  "WWT1733/moonfs/src/binio" @binio,
+  "WWT1733/moonfs/src/block" @block,
+}
