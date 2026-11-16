@@ -1,0 +1,18 @@
+// moonfs — 纯 MoonBit 的只读文件系统镜像解析库
+// 文档：https://docs.moonbitlang.com/en/latest/toolchain/moon/module.html
+
+name = "WWT1733/moonfs"
+
+version = "0.1.0"
+
+readme = "README.md"
+
+repository = ""
+
+license = "Apache-2.0"
+
+keywords = ["filesystem", "ntfs", "ext4", "forensics", "disk-image", "wasm"]
+
+preferred_target = "wasm"
+
+description = "Pure MoonBit, FFI-free read-only filesystem image parser for NTFS and ext4, usable on native, JS and WebAssembly targets."
