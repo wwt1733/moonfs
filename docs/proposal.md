@@ -6,6 +6,7 @@
 - 参赛者：王文挺
 - 联系方式：见报名问卷（公开仓库不放置个人手机号）
 - GitHub 仓库：https://github.com/wwt1733/moonfs
+- GitLink 仓库：https://gitlink.org.cn/wwt1733/moonfs（与 GitHub 同步）
 - 项目方向：存储基础设施 / 文件系统解析
 - 项目性质：原创实现（依据公开规范编写，非移植）
 
