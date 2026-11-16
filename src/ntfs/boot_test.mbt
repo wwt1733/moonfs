@@ -53,7 +53,9 @@ fn ntfs_boot_sector(
 
 ///|
 test "ntfs geometry is decoded from the boot sector" {
-  let vol = @ntfs.parse_boot_sector(ntfs_boot_sector(512L, 8L, 0x20000L, 4L, 0xF6L, 1L))
+  let vol = @ntfs.parse_boot_sector(
+    ntfs_boot_sector(512L, 8L, 0x20000L, 4L, 0xF6L, 1L),
+  )
   assert_eq(vol.bytes_per_sector, 512)
   assert_eq(vol.sectors_per_cluster, 8)
   assert_eq(vol.cluster_size, 4096)
@@ -65,14 +67,18 @@ test "ntfs geometry is decoded from the boot sector" {
 ///|
 test "negative clusters-per-record is read as a power of two" {
   // 0xF6 == -10 -> 2^10 == 1024 bytes
-  let vol = @ntfs.parse_boot_sector(ntfs_boot_sector(512L, 8L, 0x20000L, 4L, 0xF6L, 1L))
+  let vol = @ntfs.parse_boot_sector(
+    ntfs_boot_sector(512L, 8L, 0x20000L, 4L, 0xF6L, 1L),
+  )
   assert_eq(vol.mft_record_size, 1024)
   assert_eq(vol.index_record_size, 4096)
 }
 
 ///|
 test "positive clusters-per-record multiplies by cluster size" {
-  let vol = @ntfs.parse_boot_sector(ntfs_boot_sector(4096L, 1L, 0x1000L, 4L, 2L, 2L))
+  let vol = @ntfs.parse_boot_sector(
+    ntfs_boot_sector(4096L, 1L, 0x1000L, 4L, 2L, 2L),
+  )
   assert_eq(vol.cluster_size, 4096)
   assert_eq(vol.mft_record_size, 8192)
 }
@@ -81,13 +87,13 @@ test "positive clusters-per-record multiplies by cluster size" {
 test "non-ntfs volume is rejected" {
   let arr = nb_zero(512)
   let boot = Bytes::from_array(arr)
-  let result = try Ok(@ntfs.parse_boot_sector(boot)) catch { e => Err(e) }
+  let result = Ok(@ntfs.parse_boot_sector(boot)) catch { e => Err(e) }
   assert_true(result is Err(@ntfs.NotNtfs))
 }
 
 ///|
 test "absurd sector size is rejected as bad geometry" {
   let boot = ntfs_boot_sector(1000L, 8L, 0x20000L, 4L, 0xF6L, 1L)
-  let result = try Ok(@ntfs.parse_boot_sector(boot)) catch { e => Err(e) }
+  let result = Ok(@ntfs.parse_boot_sector(boot)) catch { e => Err(e) }
   assert_true(result is Err(@ntfs.BadGeometry(_)))
 }

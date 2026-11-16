@@ -65,13 +65,18 @@ test "mbr lists active partitions only" {
 test "mbr without signature is rejected" {
   let arr = blank_sector(512)
   let img = @block.Image::from_bytes(Bytes::from_array(arr), sector_size=512)
-  let result = try Ok(@partition.read_mbr(img)) catch { e => Err(e) }
+  let result = Ok(@partition.read_mbr(img)) catch { e => Err(e) }
   assert_true(result is Err(@partition.BadSignature(_)))
 }
 
 ///|
 test "protective mbr is detected" {
-  let sector = mbr_sector([(0x00L, 0xEEL, 1L, 0xFFFFFFFFL), (0L, 0L, 0L, 0L), (0L, 0L, 0L, 0L), (0L, 0L, 0L, 0L)])
+  let sector = mbr_sector([
+    (0x00L, 0xEEL, 1L, 0xFFFFFFFFL),
+    (0L, 0L, 0L, 0L),
+    (0L, 0L, 0L, 0L),
+    (0L, 0L, 0L, 0L),
+  ])
   let img = @block.Image::from_bytes(sector, sector_size=512)
   let parts = @partition.read_mbr(img)
   assert_true(@partition.has_protective_mbr(parts))

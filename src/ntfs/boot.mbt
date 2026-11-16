@@ -67,7 +67,10 @@ fn signed_byte(value : Int64) -> Int64 {
 
 ///|
 /// 把 `clusters_per_record` 换算成字节数。
-fn record_size(clusters_per_record : Int64, cluster_size : Int32) -> Int32 raise NtfsError {
+fn record_size(
+  clusters_per_record : Int64,
+  cluster_size : Int32,
+) -> Int32 raise NtfsError {
   let signed = signed_byte(clusters_per_record)
   if signed > 0L {
     let size = signed * cluster_size.to_int64()
@@ -78,7 +81,9 @@ fn record_size(clusters_per_record : Int64, cluster_size : Int32) -> Int32 raise
   } else if signed < 0L && signed >= -16L {
     1 << (-signed).to_int()
   } else {
-    raise Corrupt(reason="invalid clusters-per-record encoding " + signed.to_string())
+    raise Corrupt(
+      reason="invalid clusters-per-record encoding " + signed.to_string(),
+    )
   }
 }
 
@@ -91,7 +96,10 @@ fn is_power_of_two(value : Int64) -> Bool {
 /// 解析卷头。
 ///
 /// `start_lba` 是分区起始扇区；对整盘镜像直接传 0。
-pub fn Volume::open(img : @block.Image, start_lba : Int64) -> Volume raise NtfsError {
+pub fn Volume::open(
+  img : @block.Image,
+  start_lba : Int64,
+) -> Volume raise NtfsError {
   let offset = start_lba * img.sector_size().to_int64()
   let boot = img.read(offset, 512) catch {
     err => raise Io(reason="cannot read boot sector: " + @block.reason_of(err))
@@ -107,15 +115,21 @@ pub fn parse_boot_sector(boot : Bytes) -> Volume raise NtfsError {
   }
   let bytes_per_sector = rd_u16(boot, 0x0B)
   let sectors_per_cluster = rd_u8(boot, 0x0D)
-  if !is_power_of_two(bytes_per_sector) || bytes_per_sector < 256L || bytes_per_sector > 4096L {
+  if !is_power_of_two(bytes_per_sector) ||
+    bytes_per_sector < 256L ||
+    bytes_per_sector > 4096L {
     raise BadGeometry(reason="bytes per sector " + bytes_per_sector.to_string())
   }
   if !is_power_of_two(sectors_per_cluster) || sectors_per_cluster > 128L {
-    raise BadGeometry(reason="sectors per cluster " + sectors_per_cluster.to_string())
+    raise BadGeometry(
+      reason="sectors per cluster " + sectors_per_cluster.to_string(),
+    )
   }
   let cluster_size = bytes_per_sector * sectors_per_cluster
   if cluster_size > 0x20000L {
-    raise BadGeometry(reason="cluster size " + cluster_size.to_string() + " exceeds 128 KiB")
+    raise BadGeometry(
+      reason="cluster size " + cluster_size.to_string() + " exceeds 128 KiB",
+    )
   }
   let total_sectors = rd_i64(boot, 0x28)
   let mft_lcn = rd_i64(boot, 0x30)
@@ -127,9 +141,9 @@ pub fn parse_boot_sector(boot : Bytes) -> Volume raise NtfsError {
     bytes_per_sector: bytes_per_sector.to_int(),
     sectors_per_cluster: sectors_per_cluster.to_int(),
     cluster_size: cluster_size.to_int(),
-    total_sectors: total_sectors,
-    mft_lcn: mft_lcn,
-    mft_mirror_lcn: mft_mirror_lcn,
+    total_sectors,
+    mft_lcn,
+    mft_mirror_lcn,
     mft_record_size: record_size(rd_u8(boot, 0x40), cluster_size.to_int()),
     index_record_size: record_size(rd_u8(boot, 0x41), cluster_size.to_int()),
   }

@@ -25,7 +25,7 @@ pub(all) struct Image {
 /// ext4 块大小可能出现的取值对齐。取其他值时报错，而不是猜一个。
 pub fn Image::from_bytes(
   data : Bytes,
-  sector_size? : Int32 = 512,
+  sector_size~ : Int32 = 512,
 ) -> Image raise BlockError {
   let ok = match sector_size {
     512 | 1024 | 2048 | 4096 => true
@@ -34,7 +34,7 @@ pub fn Image::from_bytes(
   if !ok {
     raise InvalidSectorSize(size=sector_size)
   }
-  { data: data, sector_size: sector_size }
+  { data, sector_size, }
 }
 
 ///|
@@ -64,7 +64,11 @@ pub fn Image::sector_count(self : Image) -> Int64 {
 ///
 /// 区间必须完整落在镜像内；不做"读到多少算多少"的宽容处理，
 /// 因为静默截断会让上层把残缺数据结构解析成合法数据。
-pub fn Image::read(self : Image, offset : Int64, len : Int32) -> Bytes raise BlockError {
+pub fn Image::read(
+  self : Image,
+  offset : Int64,
+  len : Int32,
+) -> Bytes raise BlockError {
   let size = self.size()
   let need = len.to_int64()
   if offset < 0L || need < 0L || offset + need > size {
@@ -90,11 +94,19 @@ pub fn Image::read_sectors(
   count : Int64,
 ) -> Bytes raise BlockError {
   if count < 0L {
-    raise OutOfBounds(offset=lba * self.sector_size.to_int64(), need=count, size=self.size())
+    raise OutOfBounds(
+      offset=lba * self.sector_size.to_int64(),
+      need=count,
+      size=self.size(),
+    )
   }
   let total = count * self.sector_size.to_int64()
   if total > 0x7fffffffL {
-    raise OutOfBounds(offset=lba * self.sector_size.to_int64(), need=total, size=self.size())
+    raise OutOfBounds(
+      offset=lba * self.sector_size.to_int64(),
+      need=total,
+      size=self.size(),
+    )
   }
   self.read(lba * self.sector_size.to_int64(), total.to_int())
 }

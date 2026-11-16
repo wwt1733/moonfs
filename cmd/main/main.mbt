@@ -37,7 +37,8 @@ fn scheme_name(part : @partition.Partition) -> String {
 fn partition_error_text(err : @partition.PartitionError) -> String {
   match err {
     Io(reason~) => "cannot read partition table: " + reason
-    BadSignature(found~) => "no MBR signature at end of sector 0 (found 0x" + found.to_string() + ")"
+    BadSignature(found~) =>
+      "no MBR signature at end of sector 0 (found 0x" + found.to_string() + ")"
     Corrupt(reason~) => reason
   }
 }
@@ -51,15 +52,10 @@ fn describe_partition(part : @partition.Partition) -> String {
       line = line + "  \"" + part.name + "\""
     }
   } else {
-    line =
-      line +
+    line = line +
       "  type=0x" +
       part.mbr_type.to_string() +
-      (if part.bootable {
-        "  [active]"
-      } else {
-        ""
-      })
+      (if part.bootable { "  [active]" } else { "" })
   }
   line +
   "  start=" +
@@ -87,7 +83,7 @@ fn cmd_partitions(path : String) -> Unit {
   match read_image(path) {
     Err(message) => println("error: " + message)
     Ok(img) => {
-      let result = try Ok(@partition.read(img)) catch { e => Err(e) }
+      let result = Ok(@partition.read(img)) catch { e => Err(e) }
       match result {
         Err(err) => println("error: " + partition_error_text(err))
         Ok(parts) =>
@@ -121,7 +117,9 @@ fn cmd_info(path : String) -> Unit {
       println("partitions: " + parts.length().to_string())
       for part in parts {
         // 逐分区尝试识别 NTFS 卷头；识别不出来不算错误，镜像里可能只有分区表
-        let volume = @ntfs.Volume::open(img, part.start_lba) catch { _ => continue }
+        let volume = @ntfs.Volume::open(img, part.start_lba) catch {
+          _ => continue
+        }
         println(
           "  #" +
           part.index.to_string() +

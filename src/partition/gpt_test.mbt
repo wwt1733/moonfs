@@ -101,6 +101,6 @@ test "corrupted gpt header is rejected" {
   // 改动头里的磁盘 GUID，CRC 不再匹配
   arr[512 + 60] = b"\x7f".at(0)
   let img = @block.Image::from_bytes(Bytes::from_array(arr), sector_size=512)
-  let result = try Ok(@partition.read(img)) catch { e => Err(e) }
+  let result = Ok(@partition.read(img)) catch { e => Err(e) }
   assert_true(result is Err(@partition.Corrupt(_)))
 }

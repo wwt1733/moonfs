@@ -11,7 +11,7 @@ repository = ""
 
 license = "Apache-2.0"
 
-keywords = ["filesystem", "ntfs", "ext4", "forensics", "disk-image", "wasm"]
+keywords = [ "filesystem", "ntfs", "ext4", "forensics", "disk-image", "wasm" ]
 
 preferred_target = "wasm"
 

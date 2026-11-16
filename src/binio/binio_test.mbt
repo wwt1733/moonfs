@@ -37,14 +37,14 @@ test "i64le decodes positive values" {
 ///|
 test "reads past the end are rejected instead of truncated" {
   let buf = b"\x01\x02"
-  let result = try Ok(@binio.u32le(buf, 0)) catch { e => Err(e) }
+  let result = Ok(@binio.u32le(buf, 0)) catch { e => Err(e) }
   assert_true(result is Err(_))
 }
 
 ///|
 test "negative offset is rejected" {
   let buf = b"\x01\x02"
-  let result = try Ok(@binio.u8(buf, -1)) catch { e => Err(e) }
+  let result = Ok(@binio.u8(buf, -1)) catch { e => Err(e) }
   assert_true(result is Err(_))
 }
 

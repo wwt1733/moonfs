@@ -14,13 +14,18 @@ test "default sector size is 512" {
 ///|
 test "unsupported sector size is rejected" {
   let data = Bytes::makei(4096, i => i.to_byte())
-  let result = try Ok(@block.Image::from_bytes(data, sector_size=600)) catch { e => Err(e) }
+  let result = Ok(@block.Image::from_bytes(data, sector_size=600)) catch {
+    e => Err(e)
+  }
   assert_true(result is Err(@block.InvalidSectorSize(_)))
 }
 
 ///|
 test "custom sector size changes sector count" {
-  let img = @block.Image::from_bytes(Bytes::makei(4096, i => i.to_byte()), sector_size=4096)
+  let img = @block.Image::from_bytes(
+    Bytes::makei(4096, i => i.to_byte()),
+    sector_size=4096,
+  )
   assert_eq(img.sector_count(), 1L)
 }
 
@@ -33,14 +38,14 @@ test "read returns the requested window" {
 ///|
 test "read past the end raises instead of truncating" {
   let img = sample_image(512)
-  let result = try Ok(img.read(500L, 20)) catch { e => Err(e) }
+  let result = Ok(img.read(500L, 20)) catch { e => Err(e) }
   assert_true(result is Err(@block.OutOfBounds(_)))
 }
 
 ///|
 test "negative offset is rejected" {
   let img = sample_image(512)
-  let result = try Ok(img.read(-1L, 4)) catch { e => Err(e) }
+  let result = Ok(img.read(-1L, 4)) catch { e => Err(e) }
   assert_true(result is Err(@block.OutOfBounds(_)))
 }
 

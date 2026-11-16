@@ -23,11 +23,7 @@ fn all_zero(bytes : Bytes) -> Bool {
 fn zeroed(bytes : Bytes, from : Int32, to : Int32) -> Bytes {
   let out : FixedArray[Byte] = FixedArray::make(bytes.length(), Byte::default())
   for i in 0..<bytes.length() {
-    out[i] = if i >= from && i < to {
-      Byte::default()
-    } else {
-      bytes.at(i)
-    }
+    out[i] = if i >= from && i < to { Byte::default() } else { bytes.at(i) }
   }
   Bytes::from_array(out)
 }
@@ -100,7 +96,8 @@ fn utf16le_to_string(raw : Bytes, off : Int32, len : Int32) -> String {
       break
     }
     if unit >= 0xD800 && unit <= 0xDBFF && i + 3 < len {
-      let low = raw.at(off + i + 2).to_int() | (raw.at(off + i + 3).to_int() << 8)
+      let low = raw.at(off + i + 2).to_int() |
+        (raw.at(off + i + 3).to_int() << 8)
       if low >= 0xDC00 && low <= 0xDFFF {
         let code = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
         if code.to_char() is Some(c) {
@@ -133,7 +130,9 @@ pub fn read_gpt(img : @block.Image) -> Array[Partition] raise PartitionError {
   }
   let header_size = rd_u32(header, 12)
   if header_size < GPT_HEADER_MIN_SIZE || header_size > sector_size {
-    raise Corrupt(reason="gpt header size " + header_size.to_string() + " out of range")
+    raise Corrupt(
+      reason="gpt header size " + header_size.to_string() + " out of range",
+    )
   }
   let stored_crc = rd_u32(header, 16)
   let header_bytes = zeroed(rd_slice(header, 0, header_size.to_int()), 16, 20)
@@ -145,11 +144,15 @@ pub fn read_gpt(img : @block.Image) -> Array[Partition] raise PartitionError {
   let entry_size = rd_u32(header, 84)
   let entries_crc = rd_u32(header, 88)
   if entry_size < GPT_ENTRY_MIN_SIZE {
-    raise Corrupt(reason="gpt entry size " + entry_size.to_string() + " is too small")
+    raise Corrupt(
+      reason="gpt entry size " + entry_size.to_string() + " is too small",
+    )
   }
   let total = num_entries * entry_size
   if total <= 0L || total > 0x7fffffffL {
-    raise Corrupt(reason="gpt entry array size " + total.to_string() + " out of range")
+    raise Corrupt(
+      reason="gpt entry array size " + total.to_string() + " out of range",
+    )
   }
   let entries = img.read(entries_lba * sector_size, total.to_int()) catch {
     err => raise Io(reason=io_reason(err))

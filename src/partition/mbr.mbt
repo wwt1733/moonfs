@@ -81,7 +81,11 @@ fn rd_i64(buf : Bytes, off : Int32) -> Int64 raise PartitionError {
 }
 
 ///|
-fn rd_slice(buf : Bytes, off : Int32, len : Int32) -> Bytes raise PartitionError {
+fn rd_slice(
+  buf : Bytes,
+  off : Int32,
+  len : Int32,
+) -> Bytes raise PartitionError {
   @binio.slice(buf, off, len) catch {
     _ => raise Corrupt(reason="field read out of range at " + off.to_string())
   }

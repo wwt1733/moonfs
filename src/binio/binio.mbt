@@ -92,7 +92,11 @@ pub fn i64be(bytes : Bytes, offset : Int32) -> Int64 raise BinError {
 /// 复制一段字节。
 ///
 /// 返回新分配的 `Bytes`，与源缓冲区不共享内存。
-pub fn slice(bytes : Bytes, offset : Int32, len : Int32) -> Bytes raise BinError {
+pub fn slice(
+  bytes : Bytes,
+  offset : Int32,
+  len : Int32,
+) -> Bytes raise BinError {
   ensure(bytes, offset, len)
   let out : FixedArray[Byte] = FixedArray::make(len, Byte::default())
   for i in 0..<len {
