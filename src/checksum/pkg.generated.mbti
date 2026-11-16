@@ -1,0 +1,15 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "WWT1733/moonfs/src/checksum"
+
+// Values
+pub fn crc32(Bytes) -> Int64
+
+pub fn crc32c(Bytes) -> Int64
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
