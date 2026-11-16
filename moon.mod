@@ -16,3 +16,7 @@ keywords = ["filesystem", "ntfs", "ext4", "forensics", "disk-image", "wasm"]
 preferred_target = "wasm"
 
 description = "Pure MoonBit, FFI-free read-only filesystem image parser for NTFS and ext4, usable on native, JS and WebAssembly targets."
+
+import {
+  "moonbitlang/x@0.5.7",
+}

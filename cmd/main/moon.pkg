@@ -1,5 +1,9 @@
-// import {
-//   "username/moonfs" @lib,
-// }
+import {
+  "WWT1733/moonfs/src/block" @block,
+  "WWT1733/moonfs/src/partition" @partition,
+  "WWT1733/moonfs/src/ntfs" @ntfs,
+  "moonbitlang/x/fs" @fs,
+  "moonbitlang/core/env" @env,
+}
 
 pkgtype(kind: "executable")
