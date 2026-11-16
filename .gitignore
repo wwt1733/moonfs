@@ -5,3 +5,4 @@ target/
 .moonagent/
 pkg.generated.mbti
 native-test.log
+docs/proposal.submit.md
