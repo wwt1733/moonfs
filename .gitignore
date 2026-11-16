@@ -4,3 +4,4 @@ target/
 .mooncakes/
 .moonagent/
 pkg.generated.mbti
+native-test.log

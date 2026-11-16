@@ -26,7 +26,12 @@ jobs:
         run: moon check --deny-warn
 
       - name: Test on native
-        run: moon test --deny-warn
+        run: |
+          moon test --deny-warn 2>&1 | tee native-test.log
+          # a run that discovers zero tests also exits 0, so assert on the summary
+          grep -q "failed: 0" native-test.log
+          grep -q "Total tests: " native-test.log
+          ! grep -q "Total tests: 0," native-test.log
 
       - name: Test on js
         run: moon test --target js --deny-warn
