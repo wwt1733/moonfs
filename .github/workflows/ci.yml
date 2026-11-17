@@ -62,6 +62,7 @@ jobs:
           run_cli export testdata/synth-ntfs.img /compressed.txt out-comp.bin
           run_cli export testdata/synth-ntfs.img /big.bin out-big.bin
           run_cli export testdata/synth-ntfs.img /sparse.bin out-sparse.bin
+          run_cli export testdata/synth-ntfs.img /split.bin out-split.bin
           python3 - <<'PY'
           comp = open("out-comp.bin", "rb").read()
           assert len(comp) == 1024, f"compressed length {len(comp)}"
@@ -71,5 +72,8 @@ jobs:
           assert big == bytes((i * 37 + 11) & 0xFF for i in range(1000)), "big.bin differs"
           sparse = open("out-sparse.bin", "rb").read()
           assert sparse == bytes(512), "sparse file did not read back as zeros"
+          split = open("out-split.bin", "rb").read()
+          assert len(split) == 2000, f"split.bin length {len(split)}"
+          assert split == bytes((i * 7 + 3) & 0xFF for i in range(2000)), "split.bin differs: $ATTRIBUTE_LIST extents were not merged"
           print("compressed, non-resident and sparse payloads verified")
           PY

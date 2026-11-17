@@ -76,6 +76,10 @@ pub(all) struct Attribute {
   allocated_size : Int64
   data_size : Int64
   initialized_size : Int64
+  /// 解析出来的 runlist。放在属性里而不是调用方再传记录进来，
+  /// 是因为 `$ATTRIBUTE_LIST` 会把同一类属性的多个段分散在不同记录里，
+  /// 合并时每段都必须按**它自己所在的记录**解 runlist。
+  runs : Array[Run]
 }
 
 ///|
@@ -194,6 +198,7 @@ fn parse_attribute(
           highest_vcn.to_string(),
       )
     }
+    let runs = parse_runlist(record, off + runlist_offset.to_int(), lowest_vcn)
     {
       type_code,
       total_length,
@@ -211,6 +216,7 @@ fn parse_attribute(
       allocated_size,
       data_size,
       initialized_size,
+      runs,
     }
   } else {
     let value_length = rd_u32(record, off + 0x10)
@@ -241,6 +247,7 @@ fn parse_attribute(
       allocated_size: value_length,
       data_size: value_length,
       initialized_size: value_length,
+      runs: [],
     }
   }
 }

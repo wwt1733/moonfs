@@ -30,7 +30,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | `src/checksum` | 已完成 | crc32 / crc32c，对标准校验向量 |
 | `src/block` | 已完成 | 镜像字节源、扇区对齐访问、越界保护 |
 | `src/partition` | 已完成 | MBR 分区表、GPT 头与分区项（含 CRC32 校验） |
-| `src/ntfs` | **已完成** | 卷头、MFT 记录与 USA 修复、属性链、runlist、`$I30` 目录枚举、数据流、LZNT1 解压、稀疏段 |
+| `src/ntfs` | **已完成** | 卷头、MFT 记录与 USA 修复、属性链、`$ATTRIBUTE_LIST` 合并、runlist、`$I30` 目录枚举、数据流、LZNT1 解压、稀疏段 |
 | `src/ext4` | 二期 | 一期只承诺 NTFS 可交付，ext4 不在一期范围内 |
 | `cmd/main` | 已完成 | CLI：`info` / `partitions` / `ls` / `cat` / `export` |
 
@@ -49,7 +49,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | **稀疏段读取** | **是**（读作零） | 二期 |
 | **NTFS 压缩（LZNT1）解压** | **是** | 不适用 |
 | EFS / fscrypt 加密内容 | 明确返回 `Encrypted` 错误 | 同 |
-| `$ATTRIBUTE_LIST` 跨记录属性 | 明确返回 `Unsupported` | 不适用 |
+| `$ATTRIBUTE_LIST` 跨记录属性 | **是**（自动合并到主记录） | 不适用 |
 
 ## 目标格式版本
 
@@ -74,7 +74,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 - **只读。** 不写镜像、不改文件系统、不做日志重放（`$LogFile` / ext4 journal）。
 - **不做数据恢复与删除文件找回。** 那是另一个问题域。
 - **不做 EFS 解密。** 需要用户的证书与私钥，任何离线镜像解析器都拿不到，因此这是物理上不可行，而非实现偷懒。遇到加密属性返回 `Encrypted` 并带上路径，不返回密文冒充内容。
-- **不做 `$ATTRIBUTE_LIST` 的跨记录属性合并。** 属性多到一条记录装不下时会用到，一期遇到即返回 `Unsupported`，不静默漏读。
+- **不做非常驻的 `$ATTRIBUTE_LIST`。** 列表本身长到装不下簇时会被搬到卷上，这一层不实现；常驻形式（绝大多数情况）已支持合并。
 - **不做 ext4 htree 哈希目录的查找语义。** 二期实现时目录项走线性扫描，慢但正确。
 - **不做挂载、不做内核集成、不做写回缓存。**
 
@@ -139,6 +139,7 @@ moon test --target wasm-gc
 - **在真实 Windows 卷上验证。** `testdata/win-ntfs.img` 是 Windows 自己造出来的 NTFS 3.1 卷：`tools/make_windows_image.ps1` 用 `diskpart` 建固定 VHD、`format fs=ntfs` 格式化、写入四个文件、`compact /c` 施加真正的 LZNT1 压缩，再截掉 VHD 尾部 512 字节 footer 得到裸镜像。`tests/e2e/windows_test.mbt` 把四个文件的内容**在测试里重新算出来**逐字节比对，其中 `big.txt` 是 79 字节一行的 2593 次重复、经 LZNT1 压缩后只剩 28672 字节。
 - **算法单独钉死。** LZNT1 解压是纯函数，测试里内嵌了一段**从上面那块 Windows 卷里切出来的压缩块**（419 字节负载，还原 4096 字节）。这一条来自一次真实事故：早期实现把短语的"长度位/距离位"写死成 4/12 分栏，而合成镜像的编码器犯了同一个错，两边互相印证、测试全绿——直到真实数据进来才暴露。真实向量现在钉住了这个位置。
 - **镜像可重放。** `testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，18 KiB 的 NTFS 3.1 卷，根目录下四个文件分别走常驻、非常驻多段、LZNT1 压缩、稀疏四条路径。评审可以重跑脚本并比对字节，不必相信一个来路不明的二进制。
+- **跨记录属性的样本。** 合成镜像里有一个 `split.bin`：它的 `$DATA` 被拆成两段、分放在两条 MFT 记录和两个不相邻的簇上，靠 `$ATTRIBUTE_LIST` 串起来。只读主记录不会报错——会给出一半内容。测试断言 2000 字节全对，顺序接错立刻失败。
 - **跨后端一致。** 同一套端到端断言（`tests/e2e`）在 native / JS / wasm-gc 三个后端各跑一遍。CI 还会在 wasm-gc 下真正执行 `export`，把解出的内容与生成器写入的值逐字节比对——如果压缩解压只在 native 正确，这一步会挂。
 - **与外部实现对照。** `compact` 报告 `big.txt` 占用 28672 字节、`mixed.bin` 占用 12288 字节，与本项目从 runlist 算出的物理占用一致；`ls` 的逻辑大小、压缩标志也与 Windows 侧写入的值一致。
 

@@ -49,6 +49,8 @@ fn cz_attr(
     allocated_size,
     data_size,
     initialized_size: data_size,
+    // 这个用例直接传 runs 进来，属性里的 runlist 留空
+    runs: [],
   }
 }
 

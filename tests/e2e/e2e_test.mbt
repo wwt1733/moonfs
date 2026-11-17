@@ -36,7 +36,7 @@ fn entry_named(
 }
 
 ///|
-test "合成镜像：根目录四个条目，大小与生成器一致" {
+test "合成镜像：根目录五个条目，大小与生成器一致" {
   let img = match load_image() {
     Some(v) => v
     None => {
@@ -64,12 +64,13 @@ test "合成镜像：根目录四个条目，大小与生成器一致" {
       return
     }
   }
-  assert_eq(entries.length(), 4)
+  assert_eq(entries.length(), 5)
   let expected = [
     ("big.bin", 1000L),
     ("compressed.txt", 1024L),
     ("hello.txt", 14L),
     ("sparse.bin", 512L),
+    ("split.bin", 2000L),
   ]
   for pair in expected {
     let (name, size) = pair
@@ -350,4 +351,74 @@ test "合成镜像：stat 报告压缩与稀疏标志" {
   }
   assert_true(sparse_info.sparse)
   assert_eq(sparse_info.allocated_size, 0L)
+}
+
+///|
+/// 一个文件的 `$DATA` 被拆进两条记录时，必须合并后再读。
+///
+/// 只读主记录不会报错——它照样给出 1024 字节，只是后半段悄悄丢了。
+/// 这种"看起来成功"的半份数据比报错危险得多，所以合成镜像里专门放了
+/// 一个这样的文件：两段落在不相邻的簇上，顺序接错会立刻读出错误内容。
+test "合成镜像：跨记录的 $DATA 段被合并" {
+  let img = match load_image() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let vol = match open_volume(img) {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entry = match entry_named(entries, "split.bin") {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let info = @ntfs.stat_record(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(info.logical_size, 2000L)
+  // 两段各占 2 簇 = 2048 字节，与逻辑大小 2000 不同：尾部有 48 字节余量
+  assert_eq(info.allocated_size, 2048L)
+
+  let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  if data.length() != 2000 {
+    println("split.bin length " + data.length().to_string())
+    assert_true(false)
+    return
+  }
+  for i in 0..<2000 {
+    if data.at(i).to_int() != ((i * 7 + 3) & 0xFF) {
+      println("split.bin differs at " + i.to_string())
+      assert_true(false)
+      return
+    }
+  }
 }

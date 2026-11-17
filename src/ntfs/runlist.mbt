@@ -101,14 +101,8 @@ pub fn parse_runlist(
 
 ///|
 /// 从属性里取出 runlist。
-pub fn runlist_of(
-  attr : Attribute,
-  record : Bytes,
-) -> Array[Run] raise NtfsError {
-  if !attr.non_resident {
-    return []
-  }
-  parse_runlist(record, attr.runlist_offset, attr.lowest_vcn)
+pub fn runlist_of(attr : Attribute) -> Array[Run] {
+  attr.runs
 }
 
 ///|

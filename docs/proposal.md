@@ -65,6 +65,7 @@ ext4 不在本期交付范围内。后续实现时不按"内核版本"声明支�
 | `big.bin` | 非常驻，跨 2 簇 | 1000 B | 1024 B |
 | `compressed.txt` | LZNT1 压缩，压缩单元 2 簇 | 1024 B | 512 B |
 | `sparse.bin` | 稀疏，runlist 只有未分配段 | 512 B | 0 B |
+| `split.bin` | `$DATA` 拆成两段，分放两条 MFT 记录 | 2000 B | 2048 B |
 
 预期行为：
 
@@ -75,9 +76,10 @@ ext4 不在本期交付范围内。后续实现时不按"内核版本"声明支�
 | `moonfs cat /big.bin` | 1000 字节，跨簇拼接正确 |
 | `moonfs cat /compressed.txt` | **1024 字节解压后的原文**，与压缩前逐字节一致 |
 | `moonfs cat /sparse.bin` | 512 个零字节 |
+| `moonfs cat /split.bin` | **2000 字节**，跨两条 MFT 记录的段按 VCN 顺序拼好 |
 | `moonfs export .../compressed.txt out.bin` | 落盘 1024 字节，`sha256` 与原始文件一致 |
 | 加密属性（EFS） | 返回 `Encrypted(path=...)`，退出码非零，**不输出密文** |
-| `$ATTRIBUTE_LIST` 记录 | 返回 `Unsupported`，**不静默漏读属性** |
+| `$ATTRIBUTE_LIST` 记录 | 自动合并，**不静默漏读属性** |
 | 三个后端（native / js / wasm-gc） | 上述每条的输出与退出码完全一致 |
 
 这张表已经写进 CI：每次 push 都在 wasm-gc 下真正执行 `export`，把解出的字节与生成器写入的值逐字节比对。
@@ -111,7 +113,7 @@ System Volume Information   0 B            dir
 ## 拟实现的核心功能（一期）
 
 - 卷定位：MBR 与 GPT 分区表解析，含 GPT 头与分区项数组的 CRC 校验
-- NTFS 元数据：卷头几何、MFT 记录与 Update Sequence Array 修复、属性链、runlist（含有符号增量与稀疏段）
+- NTFS 元数据：卷头几何、MFT 记录与 Update Sequence Array 修复、属性链、`$ATTRIBUTE_LIST` 跨记录合并、runlist（含有符号增量与稀疏段）
 - NTFS 目录：`$INDEX_ROOT` + `$INDEX_ALLOCATION` 的 `$I30` B+ 树遍历，Win32 / DOS 命名空间区分
 - NTFS 数据：常驻、非常驻多段、稀疏（读作零）、**LZNT1 压缩单元解压**（含"原样存储"与"整单元未分配"两个分支）
 - CLI：`info` / `partitions` / `ls` / `cat` / `export`
@@ -121,7 +123,7 @@ System Volume Information   0 B            dir
 - **只读**。不写镜像、不改文件系统、不做日志重放。
 - **不做数据恢复与删除文件找回**。
 - **不做 EFS 解密**。需要用户证书与私钥，离线解析器拿不到，属物理上不可行；遇到即报错，不返回密文。
-- **不做 `$ATTRIBUTE_LIST` 的跨记录属性合并**。属性多到一条记录装不下时会用到，一期遇到即返回 `Unsupported`。
+- **不做非常驻的 `$ATTRIBUTE_LIST`**。列表本身大到装不下簇时会被搬到卷上，这一层不做；常驻形式已支持合并。
 - **ext4 不在本期交付范围内**。
 - **不做挂载、不做内核集成、不做写回缓存**。
 
@@ -137,7 +139,7 @@ System Volume Information   0 B            dir
 
 ## 当前进度
 
-仓库已建，CI 在跑，`moon test` **62 个用例在 native / js / wasm-gc 三个后端全绿**（native 由 CI 在 ubuntu 上验证）：
+仓库已建，CI 在跑，`moon test` **63 个用例在 native / js / wasm-gc 三个后端全绿**（native 由 CI 在 ubuntu 上验证）：
 
 - 字节层、`Image` 镜像访问、MBR / GPT 分区表、NTFS 卷头
 - MFT 记录与 USA 修复、属性链遍历、runlist 解码（含稀疏段与有符号增量）

@@ -127,8 +127,8 @@ pub fn list_directory(
   if !header.is_directory() {
     raise Corrupt(reason=label + " is not a directory")
   }
-  let attrs = parse_attributes(fixed, header.used_size)
-  reject_attribute_list(attrs, label)
+  // 大目录的 $INDEX_ALLOCATION 会被拆到扩展记录里，走合并版
+  let attrs = load_attributes(img, vol, mft, number)
   let out : Array[DirEntry] = []
   match find_named_attribute(attrs, ATTR_INDEX_ROOT, "$I30") {
     Some(root) => collect_index_entries(root.value, 0x10, out)
@@ -137,7 +137,7 @@ pub fn list_directory(
   // 目录大到根节点装不下时，条目会分散到 $INDEX_ALLOCATION 的块里
   match find_named_attribute(attrs, ATTR_INDEX_ALLOCATION, "$I30") {
     Some(alloc) => {
-      let runs = runlist_of(alloc, fixed)
+      let runs = runlist_of(alloc)
       let cluster = vol.cluster_size.to_int64()
       let block = vol.index_record_size.to_int64()
       let cover = total_clusters(runs) * cluster

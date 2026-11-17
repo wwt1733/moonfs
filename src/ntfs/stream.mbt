@@ -7,7 +7,6 @@
 pub fn read_attribute_data(
   img : @block.Image,
   vol : Volume,
-  record : Bytes,
   attr : Attribute,
   path : String,
 ) -> Bytes raise NtfsError {
@@ -20,7 +19,7 @@ pub fn read_attribute_data(
   if attr.data_size <= 0L {
     return Default::default()
   }
-  let runs = runlist_of(attr, record)
+  let runs = runlist_of(attr)
   if attr.is_compressed() {
     read_compressed(img, vol, attr, runs)
   } else {
@@ -62,8 +61,7 @@ pub fn stat_record(
   let label = "MFT record " + number.to_string()
   let fixed = apply_fixup(raw, vol.bytes_per_sector, label)
   let header = parse_record(fixed)
-  let attrs = parse_attributes(fixed, header.used_size)
-  reject_attribute_list(attrs, label)
+  let attrs = load_attributes(img, vol, mft, number)
   match find_named_attribute(attrs, ATTR_DATA, "") {
     Some(attr) => {
       // 物理占用按 runlist 里非稀疏簇的合计算，而不是读属性头 0x28。
@@ -73,8 +71,7 @@ pub fn stat_record(
       // 实际只占 7 簇 = 28672 字节——`compact` 报的正是后者。照 0x28 显示
       // 会让压缩文件看起来比原文还占地方，与事实相反。
       let allocated = if attr.non_resident {
-        allocated_clusters(runlist_of(attr, fixed)) *
-        vol.cluster_size.to_int64()
+        allocated_clusters(runlist_of(attr)) * vol.cluster_size.to_int64()
       } else {
         attr.allocated_size
       }
@@ -111,35 +108,10 @@ pub fn read_file(
   mft : Mft,
   number : Int64,
 ) -> Bytes raise NtfsError {
-  let raw = mft.read_record(img, number)
   let label = "MFT record " + number.to_string()
-  let fixed = apply_fixup(raw, vol.bytes_per_sector, label)
-  let header = parse_record(fixed)
-  let attrs = parse_attributes(fixed, header.used_size)
-  reject_attribute_list(attrs, label)
+  let attrs = load_attributes(img, vol, mft, number)
   match find_named_attribute(attrs, ATTR_DATA, "") {
-    Some(attr) => read_attribute_data(img, vol, fixed, attr, label)
+    Some(attr) => read_attribute_data(img, vol, attr, label)
     None => Default::default()
-  }
-}
-
-///|
-/// 拒绝带 `$ATTRIBUTE_LIST` 的记录。
-///
-/// 属性多到一条记录装不下时，NTFS 会把部分属性放到扩展记录里，用
-/// `$ATTRIBUTE_LIST` 串起来。一期没有实现合并，此时**必须报错**：
-/// 静默忽略会让大文件丢属性、大目录丢条目，而调用方完全看不出来。
-/// 报一个明确的 `Unsupported`，比给出一份"看起来完整"的错误结果好。
-pub fn reject_attribute_list(
-  attrs : Array[Attribute],
-  label : String,
-) -> Unit raise NtfsError {
-  match find_attribute(attrs, ATTR_ATTRIBUTE_LIST) {
-    Some(_) =>
-      raise Unsupported(
-        feature=label +
-          " uses $ATTRIBUTE_LIST (attributes span multiple records)",
-      )
-    None => ()
   }
 }

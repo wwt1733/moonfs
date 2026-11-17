@@ -31,11 +31,15 @@ MFT_CLUSTERS = MFT_RECORDS * RECORD // CLUSTER
 DATA_BIG_LCN = 33
 DATA_BIG_CLUSTERS = 2
 DATA_COMPRESSED_LCN = 35
-TOTAL_CLUSTERS = 36
+# split.bin 的两段刻意放在不相邻的位置，合并顺序错了会立刻读出错位内容
+DATA_SPLIT_A_LCN = 36
+DATA_SPLIT_B_LCN = 38
+TOTAL_CLUSTERS = 40
 
 FILETIME = 133_000_000_000_000_000  # a fixed timestamp, so fixtures are stable
 
 ATTR_STANDARD_INFORMATION = 0x10
+ATTR_ATTRIBUTE_LIST = 0x20
 ATTR_FILE_NAME = 0x30
 ATTR_DATA = 0x80
 ATTR_INDEX_ROOT = 0x90
@@ -86,6 +90,7 @@ def non_resident(
     alloc_size,
     flags=0,
     compression_unit=0,
+    lowest_vcn=0,
     highest_vcn=0,
     attr_id=1,
 ):
@@ -99,7 +104,7 @@ def non_resident(
     out[0x0A:0x0C] = u16(0x40)
     out[0x0C:0x0E] = u16(flags)
     out[0x0E:0x10] = u16(attr_id)
-    out[0x10:0x18] = u64(0)  # lowest_vcn
+    out[0x10:0x18] = u64(lowest_vcn)
     out[0x18:0x20] = u64(highest_vcn)
     out[0x20:0x22] = u16(0x40)
     out[0x22:0x24] = u16(compression_unit)
@@ -108,6 +113,27 @@ def non_resident(
     out[0x38:0x40] = u64(data_size)
     out[0x40 : 0x40 + len(runlist)] = runlist
     return bytes(out)
+
+
+def attribute_list(entries):
+    """Build the value of a resident $ATTRIBUTE_LIST.
+
+    Each entry is (type_code, lowest_vcn, record_number, attribute_id) and is
+    0x1A bytes when the attribute has no name. The list is what tells a reader
+    that an attribute continues in another MFT record.
+    """
+    value = bytearray()
+    for type_code, lowest_vcn, record, attr_id in entries:
+        entry = bytearray(0x1A)
+        entry[0x00:0x04] = u32(type_code)
+        entry[0x04:0x06] = u16(0x1A)
+        entry[0x06] = 0  # name length
+        entry[0x07] = 0x1A  # name offset (unused when the name is empty)
+        entry[0x08:0x10] = u64(lowest_vcn)
+        entry[0x10:0x18] = u64(record)
+        entry[0x18:0x1A] = u16(attr_id)
+        value += entry
+    return bytes(value)
 
 
 def standard_information(flags):
@@ -179,7 +205,7 @@ def index_root(entries):
     return resident(ATTR_INDEX_ROOT, bytes(out), attr_id=4, name="$I30")
 
 
-def build_record(seq, flags, attributes):
+def build_record(seq, flags, attributes, base_record=0):
     rec = bytearray(RECORD)
     rec[0:4] = b"FILE"
     rec[4:6] = u16(0x30)  # update sequence array offset
@@ -189,6 +215,7 @@ def build_record(seq, flags, attributes):
     rec[0x14:0x16] = u16(0x38)  # first attribute offset
     rec[0x16:0x18] = u16(flags)
     rec[0x1C:0x20] = u32(RECORD)
+    rec[0x20:0x28] = u64(base_record)
     pos = 0x38
     for attr in attributes:
         rec[pos : pos + len(attr)] = attr
@@ -322,6 +349,7 @@ def build_image():
         index_entry(8, "compressed.txt", FILE_ATTRIBUTE_ARCHIVE, 1024),
         index_entry(6, "hello.txt", FILE_ATTRIBUTE_ARCHIVE, 14),
         index_entry(9, "sparse.bin", FILE_ATTRIBUTE_ARCHIVE, 512),
+        index_entry(10, "split.bin", FILE_ATTRIBUTE_ARCHIVE, 2000),
     ]
     records[5] = build_record(
         1,
@@ -403,6 +431,52 @@ def build_image():
         ],
     )
 
+    # Records 10 / 11: one file whose $DATA is split across two records.
+    # A record can only hold ~1 KiB, so a file with enough attributes -- or a
+    # very long runlist -- gets its later extents moved into an "extension
+    # record" and joined by $ATTRIBUTE_LIST. Reading only the base record
+    # yields the first half of the file and no error at all.
+    list_value = attribute_list(
+        [
+            (ATTR_DATA, 0, 10, 1),
+            (ATTR_DATA, 2, 11, 2),
+        ]
+    )
+    records[10] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "split.bin", FILE_ATTRIBUTE_ARCHIVE, 2000),
+            resident(ATTR_ATTRIBUTE_LIST, list_value, attr_id=3),
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, 2, DATA_SPLIT_A_LCN, 0x00]),
+                2000,
+                2 * CLUSTER,
+                lowest_vcn=0,
+                highest_vcn=1,
+                attr_id=1,
+            ),
+        ],
+    )
+    records[11] = build_record(
+        1,
+        0x0001,
+        [
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, 2, DATA_SPLIT_B_LCN, 0x00]),
+                2000,
+                2 * CLUSTER,
+                lowest_vcn=2,
+                highest_vcn=3,
+                attr_id=2,
+            ),
+        ],
+        base_record=10,
+    )
+
     mft_offset = MFT_LCN * CLUSTER
     for number, payload in records.items():
         at = mft_offset + number * RECORD
@@ -418,6 +492,13 @@ def build_image():
     compressed = lznt1_compress_repeated(ord("A"), 1024)
     comp_at = DATA_COMPRESSED_LCN * CLUSTER
     image[comp_at : comp_at + len(compressed)] = compressed
+
+    # split.bin: 2000 deterministic bytes, stored in two non-adjacent runs
+    split = bytes(((i * 7 + 3) & 0xFF) for i in range(2000))
+    at_a = DATA_SPLIT_A_LCN * CLUSTER
+    image[at_a : at_a + 1024] = split[:1024]
+    at_b = DATA_SPLIT_B_LCN * CLUSTER
+    image[at_b : at_b + 1024] = split[1024:]
 
     return bytes(image), big, compressed
 
