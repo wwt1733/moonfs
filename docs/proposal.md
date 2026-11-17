@@ -16,6 +16,8 @@
 
 本轮把**压缩与稀疏读取纳入一期并已完成实现**，补充了格式版本承诺与三层读取终点，并在下面用一块包含压缩文件的镜像逐条说明预期行为。仓库同步更新：`testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，评审可重跑脚本复核。
 
+更重要的是**不再只在自己的合成镜像上自证**。本轮用 Windows 自带的 `diskpart` + `format fs=ntfs` + `compact /c` 造了一块真实 NTFS 3.1 卷（`testdata/win-ntfs.img`，24 MB，已入库），在这块卷上完成端到端验证。真实数据抓出了两个被合成镜像掩盖的问题：卷头 `clusters-per-index-buffer` 的字段偏移读错，以及 LZNT1 短语「长度位 / 距离位」的动态分栏被写死成固定值。两者都已修复，并把真实压缩块留作回归向量。
+
 ## 项目简介
 
 moonfs 用纯 MoonBit 实现磁盘镜像上的文件系统解析，直接读取镜像字节，不挂载、不依赖任何 C 库。
@@ -80,6 +82,32 @@ ext4 不在本期交付范围内。后续实现时不按"内核版本"声明支�
 
 这张表已经写进 CI：每次 push 都在 wasm-gc 下真正执行 `export`，把解出的字节与生成器写入的值逐字节比对。
 
+### 真实 Windows 卷上的实测
+
+同一套代码读 `testdata/win-ntfs.img`（Windows 格式化、`compact /c` 压缩）：
+
+```
+$ moonfs info testdata/win-ntfs.img
+  #0 ntfs  cluster=4096 B  mft_record=1024 B  index_record=4096 B  serial=5400-82D4
+
+$ moonfs ls testdata/win-ntfs.img /
+$MFT                        262144 B
+big.txt                     204847 B       compressed (28672 B allocated)
+mixed.bin                   196608 B       compressed (12288 B allocated)
+plain.txt                   69 B           compressed (69 B allocated)
+small.txt                   4 B            compressed (4 B allocated)
+System Volume Information   0 B            dir
+```
+
+| 文件 | 写入内容 | 占用（`compact` / 本项目） | 导出后 SHA-256 |
+| --- | --- | --- | --- |
+| `big.txt` | 204847 B，79 字节一行重复 2593 次 | 28672 / 28672 B | 与写入时一致 |
+| `mixed.bin` | 196608 B，64 KiB 确定字节 + 128 KiB 全零 | 12288 / 12288 B | 与写入时一致 |
+| `plain.txt` | 69 B 常驻 | 69 / 69 B | 与写入时一致 |
+| `small.txt` | 4 B 常驻 | 4 / 4 B | 与写入时一致 |
+
+`tests/e2e/windows_test.mbt` 把这四个文件的内容在测试里重新算出来逐字节比对，因此 CI 每次都会验证真实 LZNT1 数据。
+
 ## 拟实现的核心功能（一期）
 
 - 卷定位：MBR 与 GPT 分区表解析，含 GPT 头与分区项数组的 CRC 校验
@@ -105,14 +133,15 @@ ext4 不在本期交付范围内。后续实现时不按"内核版本"声明支�
 2. **定位层**（已完成）：分区表 → 卷起始偏移 → 卷头几何。NTFS 的难点是 `clusters_per_mft_record` 是**有符号**字节，值为负时表示 `2^-n` 字节；这一点错了，后面读 MFT 全部跑偏。GPT 必须先验 CRC 再用偏移，因为 CRC 不过的头部字段可能指向镜像任意位置。
 3. **结构层**（已完成）：MFT 记录 → USA 修复 → 属性 → runlist → 数据。四个最容易出错的点：USA 不先修复则跨扇区字段全错；runlist 的 LCN 是**有符号增量**，按无符号读会得到天文数字的簇号；目录索引项的文件引用是自己而不是 `$FILE_NAME` 里的父目录；压缩单元存在"压缩后更大所以原样存储"的分支，漏掉会把原文当 LZNT1 解并输出垃圾。
 
-**验证方式**：LZNT1 用固定向量单独测（未压缩块、短语回溯、重叠复制、多块拼接、越界报错）；镜像用脚本生成，评审可重跑；端到端断言在三个后端各跑一遍；CI 在 wasm-gc 下真正执行 `export` 并逐字节比对。
+**验证方式**：LZNT1 用固定向量单独测（未压缩块、短语回溯、重叠复制、多块拼接、越界报错），其中一条向量直接取自真实 Windows 卷；镜像用脚本生成，评审可重跑；端到端断言在三个后端各跑一遍；CI 在 wasm-gc 下真正执行 `export` 并逐字节比对。
 
 ## 当前进度
 
-仓库已建，CI 在跑，`moon test` **58 个用例在 native / js / wasm-gc 三个后端全绿**（native 由 CI 在 ubuntu 上验证）：
+仓库已建，CI 在跑，`moon test` **62 个用例在 native / js / wasm-gc 三个后端全绿**（native 由 CI 在 ubuntu 上验证）：
 
 - 字节层、`Image` 镜像访问、MBR / GPT 分区表、NTFS 卷头
 - MFT 记录与 USA 修复、属性链遍历、runlist 解码（含稀疏段与有符号增量）
 - `$I30` 目录枚举，`ls` 已在 wasm-gc 下读出四个条目的名字与大小
 - 常驻 / 非常驻多段 / 稀疏 / LZNT1 压缩四种数据路径，`cat` 与 `export` 在 wasm-gc 下实测输出与原文件逐字节一致
-- `tools/make_test_image.py` 可重现生成测试镜像
+- **真实 Windows 卷**（`testdata/win-ntfs.img`）上四个文件全部读出，SHA-256 与写入时一致；压缩块作为回归向量内嵌在单元测试里
+- `tools/make_test_image.py` 生成合成镜像，`tools/make_windows_image.ps1` 生成真实镜像，两者都可重跑

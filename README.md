@@ -85,12 +85,14 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 let img = @block.Image::from_bytes(bytes)
 let parts = @partition.read(img)
 
-// 打开 NTFS 卷，列出根目录
+// 打开 NTFS 卷与它的 MFT
 let vol = @ntfs.Volume::open(img, parts[0].start_lba)
-let entries = @ntfs.list_root(img, vol)
+let mft = @ntfs.Mft::open(img, vol)
+
+// 列根目录（根目录固定是记录号 5）
+let entries = @ntfs.list_directory(img, vol, mft, 5L)
 
 // 按记录号读文件内容（压缩、稀疏、多段都在这个入口下面处理）
-let mft = @ntfs.Mft::open(img, vol)
 let data = @ntfs.read_file(img, vol, mft, entries[0].record_number)
 ```
 
@@ -104,15 +106,22 @@ moonfs cat <image> <path>           输出文件内容
 moonfs export <image> <path> <out>  把文件解出到本地
 ```
 
-`ls` 对压缩文件同时显示逻辑大小与占用大小：
+`ls` 对压缩文件同时显示逻辑大小与占用大小。下面是**真实 Windows 卷**上的输出（wasm-gc 后端）：
 
 ```
-$ moonfs ls testdata/synth-ntfs.img /
-big.bin                 1000 B
-compressed.txt          1024 B        compressed (512 B allocated)
-hello.txt               14 B
-sparse.bin              512 B         sparse
+$ moonfs info testdata/win-ntfs.img
+  #0 ntfs  cluster=4096 B  mft_record=1024 B  index_record=4096 B  serial=5400-82D4
+
+$ moonfs ls testdata/win-ntfs.img /
+$MFT                        262144 B
+big.txt                     204847 B       compressed (28672 B allocated)
+mixed.bin                   196608 B       compressed (12288 B allocated)
+plain.txt                   69 B           compressed (69 B allocated)
+small.txt                   4 B            compressed (4 B allocated)
+System Volume Information   0 B            dir
 ```
+
+占用大小按 runlist 里非稀疏簇的合计算，与 `compact` 报告的一致。属性头里另有一个「按压缩单元取整的虚拟分配」（`big.txt` 上是 262144），照它显示会让压缩文件看起来比原文还占地方。
 
 三个后端构建与测试：
 
@@ -127,10 +136,11 @@ moon test --target wasm-gc
 
 正确性不靠"看起来对"：
 
-- **算法单独钉死。** LZNT1 解压是纯函数（`Bytes -> Array[Byte]`），用固定向量覆盖未压缩块、短语回溯、重叠复制、多块拼接、越界报错五种情形。重叠复制必须逐字节展开，用块拷贝会得到错误结果却不报错。
+- **在真实 Windows 卷上验证。** `testdata/win-ntfs.img` 是 Windows 自己造出来的 NTFS 3.1 卷：`tools/make_windows_image.ps1` 用 `diskpart` 建固定 VHD、`format fs=ntfs` 格式化、写入四个文件、`compact /c` 施加真正的 LZNT1 压缩，再截掉 VHD 尾部 512 字节 footer 得到裸镜像。`tests/e2e/windows_test.mbt` 把四个文件的内容**在测试里重新算出来**逐字节比对，其中 `big.txt` 是 79 字节一行的 2593 次重复、经 LZNT1 压缩后只剩 28672 字节。
+- **算法单独钉死。** LZNT1 解压是纯函数，测试里内嵌了一段**从上面那块 Windows 卷里切出来的压缩块**（419 字节负载，还原 4096 字节）。这一条来自一次真实事故：早期实现把短语的"长度位/距离位"写死成 4/12 分栏，而合成镜像的编码器犯了同一个错，两边互相印证、测试全绿——直到真实数据进来才暴露。真实向量现在钉住了这个位置。
 - **镜像可重放。** `testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，18 KiB 的 NTFS 3.1 卷，根目录下四个文件分别走常驻、非常驻多段、LZNT1 压缩、稀疏四条路径。评审可以重跑脚本并比对字节，不必相信一个来路不明的二进制。
 - **跨后端一致。** 同一套端到端断言（`tests/e2e`）在 native / JS / wasm-gc 三个后端各跑一遍。CI 还会在 wasm-gc 下真正执行 `export`，把解出的内容与生成器写入的值逐字节比对——如果压缩解压只在 native 正确，这一步会挂。
-- **与外部实现对照。** 后续补充 `7z l`、`ntfs-3g`、内核 `debugfs` 的输出对照，同名文件逐字节比较。
+- **与外部实现对照。** `compact` 报告 `big.txt` 占用 28672 字节、`mixed.bin` 占用 12288 字节，与本项目从 runlist 算出的物理占用一致；`ls` 的逻辑大小、压缩标志也与 Windows 侧写入的值一致。
 
 ## 参考与许可
 

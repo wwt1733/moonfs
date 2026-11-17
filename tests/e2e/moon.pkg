@@ -1,6 +1,7 @@
 import {
   "wwt1733/moonfs/src/block",
   "wwt1733/moonfs/src/ntfs",
+  "wwt1733/moonfs/src/partition",
   "moonbitlang/x/fs",
   "moonbitlang/core/encoding/utf8",
 } for "test"
