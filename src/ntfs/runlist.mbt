@@ -13,10 +13,10 @@ pub(all) struct Run {
 
 ///|
 /// 读 n 字节小端无符号数。
-fn read_unsigned_le(data : Bytes, pos : Int, n : Int) -> Int64 {
+fn read_unsigned_le(data : Bytes, pos : Int32, n : Int32) -> Int64 {
   let mut value = 0L
   for i in 0..<n {
-    value = value | (data.at((pos + i)).to_int64() << (8 * i))
+    value = value | (data.at(pos + i).to_int64() << (8 * i))
   }
   value
 }
@@ -27,13 +27,13 @@ fn read_unsigned_le(data : Bytes, pos : Int, n : Int) -> Int64 {
 /// runlist 里的 LCN 是相对上一段的增量，必须按有符号解释：文件向后
 /// 分配时增量为负，当成无符号会得到一个天文数字的簇号，然后读到镜像
 /// 之外或者读到完全无关的数据。
-fn read_signed_le(data : Bytes, pos : Int, n : Int) -> Int64 {
+fn read_signed_le(data : Bytes, pos : Int32, n : Int32) -> Int64 {
   let mut value = 0L
   for i in 0..<n {
-    value = value | (data.at((pos + i)).to_int64() << (8 * i))
+    value = value | (data.at(pos + i).to_int64() << (8 * i))
   }
   if n < 8 {
-    let high = data.at((pos + n - 1)).to_int()
+    let high = data.at(pos + n - 1).to_int()
     if high >= 0x80 {
       value = value - (1L << (8 * n))
     }
@@ -69,14 +69,14 @@ pub fn parse_runlist(
     let off_bytes = (header >> 4) & 0x0F
     if len_bytes == 0 || len_bytes > 8 || off_bytes > 8 {
       raise Corrupt(
-        reason="runlist entry at " +
-        pos.to_string() +
-        " has an invalid header",
+        reason="runlist entry at " + pos.to_string() + " has an invalid header",
       )
     }
     let entry_end = pos + 1 + len_bytes + off_bytes
     if entry_end > end {
-      raise Corrupt(reason="runlist entry at " + pos.to_string() + " is truncated")
+      raise Corrupt(
+        reason="runlist entry at " + pos.to_string() + " is truncated",
+      )
     }
     let clusters = read_unsigned_le(data, pos + 1, len_bytes)
     if clusters <= 0L {
@@ -84,14 +84,14 @@ pub fn parse_runlist(
     }
     if off_bytes == 0 {
       // 稀疏段：不消耗实际簇，但占用 VCN 空间
-      out.push({ vcn, lcn: -1L, clusters, sparse: true })
+      out.push({ vcn, lcn: -1L, clusters, sparse: true, })
     } else {
       let delta = read_signed_le(data, pos + 1 + len_bytes, off_bytes)
       lcn = lcn + delta
       if lcn < 0L {
         raise Corrupt(reason="runlist resolves to a negative cluster number")
       }
-      out.push({ vcn, lcn, clusters, sparse: false })
+      out.push({ vcn, lcn, clusters, sparse: false, })
     }
     vcn = vcn + clusters
     pos = entry_end
@@ -101,7 +101,10 @@ pub fn parse_runlist(
 
 ///|
 /// 从属性里取出 runlist。
-pub fn runlist_of(attr : Attribute, record : Bytes) -> Array[Run] raise NtfsError {
+pub fn runlist_of(
+  attr : Attribute,
+  record : Bytes,
+) -> Array[Run] raise NtfsError {
   if !attr.non_resident {
     return []
   }
@@ -124,7 +127,7 @@ pub fn total_clusters(runs : Array[Run]) -> Int64 {
 /// 返回 `None` 表示该 VCN 超出 runlist 覆盖范围；返回 `Some(None)` 表示
 /// 该 VCN 落在稀疏段（应读作零）。这种双层 Option 有点绕，但比用
 /// 魔法值 -1 表示稀疏更安全——魔法值迟早会和真实的 LCN 0 混淆。
-pub fn lookup_cluster(runs : Array[Run], vcn : Int64) -> Option[Option[Int64]] {
+pub fn lookup_cluster(runs : Array[Run], vcn : Int64) -> Int64?? {
   for run in runs {
     if vcn >= run.vcn && vcn < run.vcn + run.clusters {
       if run.sparse {

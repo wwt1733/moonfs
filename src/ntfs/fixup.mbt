@@ -27,10 +27,10 @@ pub fn apply_fixup(
   if sector_size <= 0 || len % sector_size != 0 {
     raise Corrupt(
       reason=label +
-      ": size " +
-      len.to_string() +
-      " is not a multiple of sector size " +
-      sector_size.to_string(),
+        ": size " +
+        len.to_string() +
+        " is not a multiple of sector size " +
+        sector_size.to_string(),
     )
   }
   let usa_offset = rd_u16(record, 0x04).to_int()
@@ -40,19 +40,19 @@ pub fn apply_fixup(
   if usa_count != sectors + 1 {
     raise Corrupt(
       reason=label +
-      ": update sequence count " +
-      usa_count.to_string() +
-      " does not match " +
-      sectors.to_string() +
-      " sector(s)",
+        ": update sequence count " +
+        usa_count.to_string() +
+        " does not match " +
+        sectors.to_string() +
+        " sector(s)",
     )
   }
   if usa_offset < 0 || usa_offset + usa_count * 2 > len {
     raise Corrupt(
       reason=label +
-      ": update sequence array at " +
-      usa_offset.to_string() +
-      " is out of range",
+        ": update sequence array at " +
+        usa_offset.to_string() +
+        " is out of range",
     )
   }
   let out : FixedArray[Byte] = FixedArray::make(len, Byte::default())
@@ -66,9 +66,9 @@ pub fn apply_fixup(
     if out[tail] != usn_lo || out[tail + 1] != usn_hi {
       raise Corrupt(
         reason=label +
-        ": update sequence mismatch at end of sector " +
-        i.to_string() +
-        " (torn write)",
+          ": update sequence mismatch at end of sector " +
+          i.to_string() +
+          " (torn write)",
       )
     }
     out[tail] = out[usa_offset + i * 2]

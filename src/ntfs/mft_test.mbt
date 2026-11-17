@@ -68,9 +68,7 @@ fn mz_record_with_fixup(
 ///|
 test "fixup 还原被搬到 USA 里的扇区末尾" {
   let raw = mz_record_with_fixup(0x0001, 0xBBAA, 0xDDCC)
-  let fixed = try {
-    @ntfs.apply_fixup(Bytes::from_array(raw), 512, "test record")
-  } catch {
+  let fixed = @ntfs.apply_fixup(Bytes::from_array(raw), 512, "test record") catch {
     _ => {
       assert_true(false)
       return
@@ -104,16 +102,10 @@ test "记录头解析出属性起点与目录标志" {
   mz_u16le(raw, 0x14, 0x38)
   mz_u16le(raw, 0x16, 0x0003)
   mz_u32le(raw, 0x18, 0x200)
-  let fixed = try {
-    @ntfs.apply_fixup(Bytes::from_array(raw), 512, "rec")
-  } catch {
+  let fixed = @ntfs.apply_fixup(Bytes::from_array(raw), 512, "rec") catch {
     _ => return
   }
-  let header = try {
-    @ntfs.parse_record(fixed)
-  } catch {
-    _ => return
-  }
+  let header = @ntfs.parse_record(fixed) catch { _ => return }
   assert_eq(header.sequence, 7L)
   assert_eq(header.hard_links, 2L)
   assert_eq(header.first_attr, 0x38)
@@ -175,30 +167,18 @@ test "属性链遍历读出一个 FILE_NAME" {
   let end = 0x38 + first_len
   mz_u32le(raw, end, 0xFFFFFFFF)
   mz_u32le(raw, 0x18, (end + 8).to_int64())
-  let fixed = try {
-    @ntfs.apply_fixup(Bytes::from_array(raw), 512, "rec")
-  } catch {
+  let fixed = @ntfs.apply_fixup(Bytes::from_array(raw), 512, "rec") catch {
     _ => return
   }
-  let header = try {
-    @ntfs.parse_record(fixed)
-  } catch {
-    _ => return
-  }
-  let attrs = try {
-    @ntfs.parse_attributes(fixed, header.used_size)
-  } catch {
+  let header = @ntfs.parse_record(fixed) catch { _ => return }
+  let attrs = @ntfs.parse_attributes(fixed, header.used_size) catch {
     _ => return
   }
   assert_eq(attrs.length(), 1)
   let attr = attrs[0]
   assert_eq(attr.type_code, 0x30L)
   assert_true(!attr.non_resident)
-  let parsed = try {
-    @ntfs.parse_file_name(attr.value)
-  } catch {
-    _ => return
-  }
+  let parsed = @ntfs.parse_file_name(attr.value) catch { _ => return }
   assert_eq(parsed.name, "hello.txt")
   assert_eq(parsed.parent_record, 5L)
   assert_eq(parsed.parent_sequence, 1L)
@@ -218,9 +198,7 @@ test "runlist 解码含稀疏段与负增量" {
   mz_u8(raw, 6, 4)
   mz_u8(raw, 7, 0xFB) // 有符号 -5，LCN 回退到 0
   mz_u8(raw, 8, 0)
-  let runs = try {
-    @ntfs.parse_runlist(Bytes::from_array(raw), 0, 0)
-  } catch {
+  let runs = @ntfs.parse_runlist(Bytes::from_array(raw), 0, 0) catch {
     _ => return
   }
   assert_eq(runs.length(), 3)
@@ -258,9 +236,7 @@ test "runlist 的 lowest_vcn 让分段属性正确衔接" {
   mz_u8(raw, 1, 2)
   mz_u8(raw, 2, 10)
   mz_u8(raw, 3, 0)
-  let runs = try {
-    @ntfs.parse_runlist(Bytes::from_array(raw), 0, 100)
-  } catch {
+  let runs = @ntfs.parse_runlist(Bytes::from_array(raw), 0, 100) catch {
     _ => return
   }
   assert_eq(runs.length(), 1)

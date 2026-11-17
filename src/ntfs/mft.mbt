@@ -111,11 +111,7 @@ pub fn Mft::open(img : @block.Image, vol : Volume) -> Mft raise NtfsError {
     raise Corrupt(reason="MFT is resident, which a real volume never allows")
   }
   let runs = runlist_of(data, fixed)
-  {
-    cluster_size: vol.cluster_size,
-    record_size: vol.mft_record_size,
-    runs,
-  }
+  { cluster_size: vol.cluster_size, record_size: vol.mft_record_size, runs, }
 }
 
 ///|
@@ -146,17 +142,19 @@ pub fn read_from_runs(
       Some(Some(lcn)) => {
         let at = lcn * cluster + in_cluster
         let bytes = img.read(at, chunk.to_int()) catch {
-          err => raise Io(reason="cannot read cluster data: " + @block.reason_of(err))
+          err =>
+            raise Io(
+              reason="cannot read cluster data: " + @block.reason_of(err),
+            )
         }
         for i in 0..<bytes.length() {
           out.push(bytes.at(i))
         }
       }
-      Some(None) => {
+      Some(None) =>
         for _ in 0..<chunk.to_int() {
           out.push(Byte::default())
         }
-      }
       None =>
         raise Corrupt(
           reason="runlist does not cover byte offset " + pos.to_string(),

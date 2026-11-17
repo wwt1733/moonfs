@@ -80,13 +80,9 @@ test "索引节点解析出条目、跳过 DOS 短名" {
   // 索引头从 0x10 开始
   dq_u32le(arr, 0x10, 0x10) // 条目区相对索引头的偏移
   let mut cursor = 0x20
-  let len1 = dq_index_entry(
-    arr, cursor, 42, 1, "a.txt", 1, 0, 100, false,
-  )
+  let len1 = dq_index_entry(arr, cursor, 42, 1, "a.txt", 1, 0, 100, false)
   cursor = cursor + len1
-  let len2 = dq_index_entry(
-    arr, cursor, 43, 1, "sub", 1, 0x10000000, 0, false,
-  )
+  let len2 = dq_index_entry(arr, cursor, 43, 1, "sub", 1, 0x10000000, 0, false)
   cursor = cursor + len2
   // 最后一个条目：哨兵，只有头没有 key
   dq_u16le(arr, cursor + 0x08, 0x10)

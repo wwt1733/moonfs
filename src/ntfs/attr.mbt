@@ -1,24 +1,54 @@
 ///|
 /// 属性类型常量。NTFS 用这些值区分属性种类，名字前缀都是 `$`。
 pub const ATTR_STANDARD_INFORMATION : Int64 = 0x10
+
+///|
 pub const ATTR_ATTRIBUTE_LIST : Int64 = 0x20
+
+///|
 pub const ATTR_FILE_NAME : Int64 = 0x30
+
+///|
 pub const ATTR_OBJECT_ID : Int64 = 0x40
+
+///|
 pub const ATTR_SECURITY_DESCRIPTOR : Int64 = 0x50
+
+///|
 pub const ATTR_VOLUME_NAME : Int64 = 0x60
+
+///|
 pub const ATTR_VOLUME_INFORMATION : Int64 = 0x70
+
+///|
 pub const ATTR_DATA : Int64 = 0x80
+
+///|
 pub const ATTR_INDEX_ROOT : Int64 = 0x90
+
+///|
 pub const ATTR_INDEX_ALLOCATION : Int64 = 0xA0
+
+///|
 pub const ATTR_BITMAP : Int64 = 0xB0
+
+///|
 pub const ATTR_REPARSE_POINT : Int64 = 0xC0
+
+///|
 pub const ATTR_EA_INFORMATION : Int64 = 0xD0
+
+///|
 pub const ATTR_EA : Int64 = 0xE0
 
 ///|
 /// 属性头里的标志位。
 pub const ATTR_FLAG_COMPRESSED : Int64 = 0x0001
+
+///|
 pub const ATTR_FLAG_ENCRYPTED : Int64 = 0x4000
+
+///|
 pub const ATTR_FLAG_SPARSE : Int64 = 0x8000
 
 ///|
@@ -104,18 +134,20 @@ pub fn parse_attributes(
     if type_code == 0xFFFFFFFFL || type_code == 0L {
       break
     }
-    let length = rd_u32(record, (off + 4))
+    let length = rd_u32(record, off + 4)
     if length < 0x18L {
       raise Corrupt(
-        reason="attribute at " + off.to_string() + " declares length " +
-        length.to_string(),
+        reason="attribute at " +
+          off.to_string() +
+          " declares length " +
+          length.to_string(),
       )
     }
     if off.to_int64() + length > end.to_int64() {
       raise Corrupt(
         reason="attribute at " +
-        off.to_string() +
-        " overruns the record's used size",
+          off.to_string() +
+          " overruns the record's used size",
       )
     }
     out.push(parse_attribute(record, off, type_code, length.to_int()))
@@ -133,10 +165,10 @@ fn parse_attribute(
   total_length : Int32,
 ) -> Attribute raise NtfsError {
   let non_resident = rd_u8(record, off + 0x08) != 0L
-  let name_length = rd_u8(record, (off + 0x09)).to_int()
-  let name_offset = rd_u16(record, (off + 0x0A)).to_int()
-  let flags = rd_u16(record, (off + 0x0C))
-  let id = rd_u16(record, (off + 0x0E))
+  let name_length = rd_u8(record, off + 0x09).to_int()
+  let name_offset = rd_u16(record, off + 0x0A).to_int()
+  let flags = rd_u16(record, off + 0x0C)
+  let id = rd_u16(record, off + 0x0E)
   let name = if name_length == 0 {
     ""
   } else {
@@ -147,19 +179,19 @@ fn parse_attribute(
     utf16le_to_string(record, start, name_length * 2)
   }
   if non_resident {
-    let lowest_vcn = rd_i64(record, (off + 0x10))
-    let highest_vcn = rd_i64(record, (off + 0x18))
-    let runlist_offset = rd_u16(record, (off + 0x20))
-    let compression_unit = rd_u16(record, (off + 0x22))
-    let allocated_size = rd_i64(record, (off + 0x28))
-    let data_size = rd_i64(record, (off + 0x30))
-    let initialized_size = rd_i64(record, (off + 0x38))
+    let lowest_vcn = rd_i64(record, off + 0x10)
+    let highest_vcn = rd_i64(record, off + 0x18)
+    let runlist_offset = rd_u16(record, off + 0x20)
+    let compression_unit = rd_u16(record, off + 0x22)
+    let allocated_size = rd_i64(record, off + 0x28)
+    let data_size = rd_i64(record, off + 0x30)
+    let initialized_size = rd_i64(record, off + 0x38)
     if lowest_vcn < 0L || highest_vcn < lowest_vcn {
       raise Corrupt(
         reason="attribute VCN range " +
-        lowest_vcn.to_string() +
-        ".." +
-        highest_vcn.to_string(),
+          lowest_vcn.to_string() +
+          ".." +
+          highest_vcn.to_string(),
       )
     }
     {
@@ -172,15 +204,17 @@ fn parse_attribute(
       value: Default::default(),
       lowest_vcn,
       highest_vcn,
-      runlist_offset: runlist_offset.to_int(),
+      // runlist 偏移相对属性起点，转成记录内绝对偏移，
+      // 否则上层会从记录开头去读一段完全无关的字节
+      runlist_offset: off + runlist_offset.to_int(),
       compression_unit: compression_unit.to_int(),
       allocated_size,
       data_size,
       initialized_size,
     }
   } else {
-    let value_length = rd_u32(record, (off + 0x10))
-    let value_offset = rd_u16(record, (off + 0x14))
+    let value_length = rd_u32(record, off + 0x10)
+    let value_offset = rd_u16(record, off + 0x14)
     if value_offset < 0L ||
       value_offset + value_length > total_length.to_int64() {
       raise Corrupt(reason="resident value runs past the attribute end")
@@ -188,11 +222,7 @@ fn parse_attribute(
     let value = if value_length == 0L {
       Default::default()
     } else {
-      @binio.slice(
-        record,
-        off + value_offset.to_int(),
-        value_length.to_int(),
-      ) catch {
+      @binio.slice(record, off + value_offset.to_int(), value_length.to_int()) catch {
         _ => raise Corrupt(reason="cannot read resident value")
       }
     }
@@ -322,7 +352,7 @@ pub fn pick_display_name(names : Array[FileName]) -> FileName? {
     if name.name_ns == 1 || name.name_ns == 3 {
       return Some(name)
     }
-    if best is None && (name.name_ns == 0) {
+    if best is None && name.name_ns == 0 {
       best = Some(name)
     }
   }

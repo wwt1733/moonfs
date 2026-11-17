@@ -53,13 +53,16 @@ fn collect_index_entries(
   let index_length = rd_u32(data, header_start + 4)
   let start = header_start + entries_offset.to_int()
   let end = header_start + index_length.to_int()
-  if entries_offset < 0L || index_length < 0L || end > data.length() || start > end {
+  if entries_offset < 0L ||
+    index_length < 0L ||
+    end > data.length() ||
+    start > end {
     raise Corrupt(
       reason="index node declares a range outside its buffer (" +
-      start.to_string() +
-      ".." +
-      end.to_string() +
-      ")",
+        start.to_string() +
+        ".." +
+        end.to_string() +
+        ")",
     )
   }
   let mut pos = start
@@ -69,7 +72,9 @@ fn collect_index_entries(
     let flags = rd_u16(data, pos + 0x0C)
     // 长度为零会让循环原地打转，必须挡住
     if entry_length < 0x10 {
-      raise Corrupt(reason="index entry declares length " + entry_length.to_string())
+      raise Corrupt(
+        reason="index entry declares length " + entry_length.to_string(),
+      )
     }
     if key_length >= 0x42 && pos + 0x10 + key_length <= end {
       // 条目自身指向的 MFT 记录，低 48 位是记录号，高 16 位是序列号。
@@ -78,11 +83,7 @@ fn collect_index_entries(
       let key = @binio.slice(data, pos + 0x10, key_length) catch {
         _ => raise Corrupt(reason="cannot read index entry key")
       }
-      let parsed = try {
-        Some(parse_file_name(key))
-      } catch {
-        _ => None
-      }
+      let parsed = Some(parse_file_name(key)) catch { _ => None }
       if parsed is Some(info) {
         // DOS 8.3 短名不单独列出：同一文件的长名就在同一个索引里，
         // 把短名也输出会让目录看起来有重复文件。
@@ -127,11 +128,11 @@ pub fn list_directory(
     raise Corrupt(reason=label + " is not a directory")
   }
   let attrs = parse_attributes(fixed, header.used_size)
+  reject_attribute_list(attrs, label)
   let out : Array[DirEntry] = []
   match find_named_attribute(attrs, ATTR_INDEX_ROOT, "$I30") {
     Some(root) => collect_index_entries(root.value, 0x10, out)
-    None =>
-      raise Corrupt(reason=label + " has no $I30 index root attribute")
+    None => raise Corrupt(reason=label + " has no $I30 index root attribute")
   }
   // 目录大到根节点装不下时，条目会分散到 $INDEX_ALLOCATION 的块里
   match find_named_attribute(attrs, ATTR_INDEX_ALLOCATION, "$I30") {
