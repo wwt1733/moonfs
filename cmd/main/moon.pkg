@@ -4,6 +4,7 @@ import {
   "wwt1733/moonfs/src/ntfs",
   "moonbitlang/x/fs",
   "moonbitlang/core/env",
+  "moonbitlang/core/encoding/utf8",
 }
 
 pkgtype(kind: "executable")

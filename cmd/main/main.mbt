@@ -8,8 +8,13 @@ fn usage() -> Unit {
   println("moonfs — read-only filesystem image inspector")
   println("")
   println("usage:")
-  println("  moonfs info <image>        volume geometry and partition count")
-  println("  moonfs partitions <image>  partition table entries")
+  println(
+    "  moonfs info <image>                 volume geometry and partition count",
+  )
+  println("  moonfs partitions <image>           partition table entries")
+  println("  moonfs ls <image> [path]            list a directory (default /)")
+  println("  moonfs cat <image> <path>           print a file's contents")
+  println("  moonfs export <image> <path> <out>  extract a file to disk")
 }
 
 ///|
@@ -147,10 +152,252 @@ fn main {
   match command {
     "info" => cmd_info(path)
     "partitions" => cmd_partitions(path)
+    "ls" => {
+      let sub = if args.length() > 3 { args[3] } else { "/" }
+      cmd_ls(path, sub)
+    }
+    "cat" => if args.length() > 3 { cmd_cat(path, args[3]) } else { usage() }
+    "export" =>
+      if args.length() > 4 {
+        cmd_export(path, args[3], args[4])
+      } else {
+        usage()
+      }
     _ => {
       println("unknown command: " + command)
       println("")
       usage()
+    }
+  }
+}
+
+///|
+/// 尝试在指定扇区打开 NTFS 卷，失败返回 None。
+fn try_volume(img : @block.Image, lba : Int64) -> @ntfs.Volume? {
+  let vol = @ntfs.Volume::open(img, lba) catch { _ => return None }
+  Some(vol)
+}
+
+///|
+/// 在镜像里找 NTFS 卷：先看分区表，找不到就把整个镜像当作裸卷。
+fn open_volume(img : @block.Image) -> Result[@ntfs.Volume, String] {
+  let parts = @partition.read(img) catch { _ => [] }
+  for part in parts {
+    if try_volume(img, part.start_lba) is Some(vol) {
+      return Ok(vol)
+    }
+  }
+  match try_volume(img, 0L) {
+    Some(vol) => Ok(vol)
+    None => Err("no NTFS volume found in this image")
+  }
+}
+
+///|
+fn pad_right(text : String, width : Int32) -> String {
+  let mut out = text
+  while out.length() < width {
+    out = out + " "
+  }
+  out
+}
+
+///|
+fn ntfs_error_text(err : @ntfs.NtfsError) -> String {
+  @ntfs.describe_error(err)
+}
+
+///|
+/// 把一个路径解析成 MFT 记录号。根目录固定是 5。
+///
+/// 用 `Result` 而不是抛错：跨包不能构造 NTFS 的 suberror 变体，
+/// 而且调用方需要区分"路径不存在"和"镜像坏了"。
+fn resolve_path(
+  img : @block.Image,
+  vol : @ntfs.Volume,
+  mft : @ntfs.Mft,
+  path : String,
+) -> Result[Int64, String] {
+  let mut current = 5L
+  for segment in path.split("/") {
+    let name = segment.to_owned()
+    if name == "" {
+      continue
+    }
+    let entries = @ntfs.list_directory(img, vol, mft, current) catch {
+      err => return Err(@ntfs.describe_error(err))
+    }
+    let mut found = false
+    for entry in entries {
+      if entry.name == name {
+        current = entry.record_number
+        found = true
+        break
+      }
+    }
+    if !found {
+      return Err("no entry named \"" + name + "\" under " + path)
+    }
+  }
+  Ok(current)
+}
+
+///|
+fn describe_entry(
+  img : @block.Image,
+  vol : @ntfs.Volume,
+  mft : @ntfs.Mft,
+  entry : @ntfs.DirEntry,
+) -> String {
+  let info = @ntfs.stat_record(img, vol, mft, entry.record_number) catch {
+    _ =>
+      {
+        number: entry.record_number,
+        logical_size: entry.logical_size,
+        allocated_size: entry.allocated_size,
+        compressed: false,
+        encrypted: false,
+        sparse: false,
+        is_directory: entry.is_directory(),
+      }
+  }
+  let mut marks = ""
+  if info.is_directory {
+    marks = marks + " dir"
+  }
+  if info.compressed {
+    marks = marks + " compressed"
+    marks = marks + " (" + info.allocated_size.to_string() + " B allocated)"
+  }
+  if info.sparse {
+    marks = marks + " sparse"
+  }
+  if info.encrypted {
+    marks = marks + " encrypted"
+  }
+  pad_right(entry.name, 24) +
+  pad_right(info.logical_size.to_string() + " B", 14) +
+  marks
+}
+
+///|
+fn cmd_ls(image_path : String, sub_path : String) -> Unit {
+  match read_image(image_path) {
+    Err(message) => println("error: " + message)
+    Ok(img) => {
+      let vol = match open_volume(img) {
+        Ok(v) => v
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let mft = @ntfs.Mft::open(img, vol) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      let number = match resolve_path(img, vol, mft, sub_path) {
+        Ok(n) => n
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let entries = @ntfs.list_directory(img, vol, mft, number) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      for entry in entries {
+        println(describe_entry(img, vol, mft, entry))
+      }
+    }
+  }
+}
+
+///|
+fn cmd_cat(image_path : String, sub_path : String) -> Unit {
+  match read_image(image_path) {
+    Err(message) => println("error: " + message)
+    Ok(img) => {
+      let vol = match open_volume(img) {
+        Ok(v) => v
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let mft = @ntfs.Mft::open(img, vol) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      let number = match resolve_path(img, vol, mft, sub_path) {
+        Ok(n) => n
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let data = @ntfs.read_file(img, vol, mft, number) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      println(@utf8.decode_lossy(data))
+    }
+  }
+}
+
+///|
+fn cmd_export(
+  image_path : String,
+  sub_path : String,
+  out_path : String,
+) -> Unit {
+  match read_image(image_path) {
+    Err(message) => println("error: " + message)
+    Ok(img) => {
+      let vol = match open_volume(img) {
+        Ok(v) => v
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let mft = @ntfs.Mft::open(img, vol) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      let number = match resolve_path(img, vol, mft, sub_path) {
+        Ok(n) => n
+        Err(message) => {
+          println("error: " + message)
+          return
+        }
+      }
+      let data = @ntfs.read_file(img, vol, mft, number) catch {
+        err => {
+          println("error: " + ntfs_error_text(err))
+          return
+        }
+      }
+      @fs.write_bytes_to_file(out_path, data) catch {
+        _ => {
+          println("error: cannot write " + out_path)
+          return
+        }
+      }
+      println(
+        "wrote " + out_path + " (" + data.length().to_string() + " bytes)",
+      )
     }
   }
 }

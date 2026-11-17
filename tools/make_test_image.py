@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""Generate a minimal but structurally valid NTFS 3.1 image for tests.
+
+The image is small enough to live in the repository and is built entirely
+from the on-disk layout documented in [MS-FSCC] / linux-ntfs, so anyone can
+re-run this script and diff the result instead of trusting a binary blob.
+
+Layout (cluster = 512 bytes, MFT record = 1024 bytes):
+
+    LCN 0        boot sector
+    LCN 1..32    $MFT, 16 records
+    LCN 33..34   big.bin data (non-resident, 2 clusters)
+    LCN 35       compressed.txt payload (LZNT1, occupies 1 cluster)
+
+The volume carries four files on purpose, one per data path the parser has
+to handle: resident, non-resident multi-cluster, LZNT1 compressed, sparse.
+"""
+
+import struct
+import sys
+from pathlib import Path
+
+SECTOR = 512
+CLUSTER = 512
+RECORD = 1024
+MFT_LCN = 1
+MFT_RECORDS = 16
+# 16 records * 1024 bytes = 16384 bytes = 32 clusters
+MFT_CLUSTERS = MFT_RECORDS * RECORD // CLUSTER
+
+DATA_BIG_LCN = 33
+DATA_BIG_CLUSTERS = 2
+DATA_COMPRESSED_LCN = 35
+TOTAL_CLUSTERS = 36
+
+FILETIME = 133_000_000_000_000_000  # a fixed timestamp, so fixtures are stable
+
+ATTR_STANDARD_INFORMATION = 0x10
+ATTR_FILE_NAME = 0x30
+ATTR_DATA = 0x80
+ATTR_INDEX_ROOT = 0x90
+
+FILE_ATTRIBUTE_ARCHIVE = 0x20
+FILE_ATTRIBUTE_DIRECTORY = 0x10000000
+
+
+def u16(v):
+    return struct.pack("<H", v)
+
+
+def u32(v):
+    return struct.pack("<I", v)
+
+
+def u64(v):
+    return struct.pack("<Q", v)
+
+
+def resident(type_code, value, flags=0, attr_id=1, name=""):
+    # $INDEX_ROOT / $INDEX_ALLOCATION / $BITMAP carry the index name "$I30";
+    # without it the parser cannot tell which index an attribute belongs to.
+    name_bytes = name.encode("utf-16-le")
+    name_off = 0x18
+    value_off = name_off + len(name_bytes)
+    total = value_off + len(value)
+    aligned = (total + 7) // 8 * 8
+    out = bytearray(aligned)
+    out[0:4] = u32(type_code)
+    out[4:8] = u32(aligned)
+    out[8] = 0
+    out[9] = len(name)
+    out[0x0A:0x0C] = u16(name_off)
+    out[0x0C:0x0E] = u16(flags)
+    out[0x0E:0x10] = u16(attr_id)
+    out[0x10:0x14] = u32(len(value))
+    out[0x14:0x16] = u16(value_off)
+    out[name_off : name_off + len(name_bytes)] = name_bytes
+    out[value_off : value_off + len(value)] = value
+    return bytes(out)
+
+
+def non_resident(
+    type_code,
+    runlist,
+    data_size,
+    alloc_size,
+    flags=0,
+    compression_unit=0,
+    highest_vcn=0,
+    attr_id=1,
+):
+    total = 0x40 + len(runlist)
+    aligned = (total + 7) // 8 * 8
+    out = bytearray(aligned)
+    out[0:4] = u32(type_code)
+    out[4:8] = u32(aligned)
+    out[8] = 1
+    out[9] = 0
+    out[0x0A:0x0C] = u16(0x40)
+    out[0x0C:0x0E] = u16(flags)
+    out[0x0E:0x10] = u16(attr_id)
+    out[0x10:0x18] = u64(0)  # lowest_vcn
+    out[0x18:0x20] = u64(highest_vcn)
+    out[0x20:0x22] = u16(0x40)
+    out[0x22:0x24] = u16(compression_unit)
+    out[0x28:0x30] = u64(alloc_size)
+    out[0x30:0x38] = u64(data_size)
+    out[0x38:0x40] = u64(data_size)
+    out[0x40 : 0x40 + len(runlist)] = runlist
+    return bytes(out)
+
+
+def standard_information(flags):
+    value = bytearray(48)
+    for off in (0, 8, 16, 24):
+        value[off : off + 8] = u64(FILETIME)
+    value[0x20:0x24] = u32(flags)
+    return resident(ATTR_STANDARD_INFORMATION, bytes(value), attr_id=0)
+
+
+def file_name(parent, name, flags, size):
+    encoded = name.encode("utf-16-le")
+    value = bytearray(0x42 + len(encoded))
+    # file reference: low 48 bits record number, high 16 bits sequence
+    value[0:8] = u64(parent | (1 << 48))
+    for off in (0x08, 0x10, 0x18, 0x20):
+        value[off : off + 8] = u64(FILETIME)
+    value[0x28:0x30] = u64(size)
+    value[0x30:0x38] = u64(size)
+    value[0x38:0x3C] = u32(flags)
+    value[0x40] = len(encoded) // 2
+    value[0x41] = 1  # Win32 namespace
+    value[0x42:] = encoded
+    return resident(ATTR_FILE_NAME, bytes(value), attr_id=1)
+
+
+def index_entry(record_no, name, flags, size, last=False):
+    encoded = name.encode("utf-16-le")
+    key = bytearray(0x42 + len(encoded))
+    key[0:8] = u64(record_no | (1 << 48))
+    for off in (0x08, 0x10, 0x18, 0x20):
+        key[off : off + 8] = u64(FILETIME)
+    key[0x28:0x30] = u64(size)
+    key[0x30:0x38] = u64(size)
+    key[0x38:0x3C] = u32(flags)
+    key[0x40] = len(encoded) // 2
+    key[0x41] = 1
+    key[0x42:] = encoded
+    total = 0x10 + len(key)
+    aligned = (total + 7) // 8 * 8
+    out = bytearray(aligned)
+    out[0:8] = u64(record_no | (1 << 48))
+    out[8:10] = u16(aligned)
+    out[10:12] = u16(len(key))
+    out[12:14] = u16(0x02 if last else 0)
+    out[0x10 : 0x10 + len(key)] = key
+    return bytes(out)
+
+
+def index_root(entries):
+    body = b"".join(entries)
+    # sentinel: header only, marks the last entry of the node
+    sentinel = bytearray(0x10)
+    sentinel[8:10] = u16(0x10)
+    sentinel[10:12] = u16(0)
+    sentinel[12:14] = u16(0x02)
+    body += bytes(sentinel)
+    out = bytearray(0x20 + len(body))
+    out[0:4] = u32(ATTR_FILE_NAME)  # indexed attribute type
+    out[4:8] = u32(1)  # collation rule
+    out[8:12] = u32(CLUSTER)  # index block size
+    out[12] = 1  # clusters per index block
+    # INDEX_HEADER starts at 0x10; entries_offset is relative to it
+    out[0x10:0x14] = u32(0x10)  # entries start 0x10 bytes into the header
+    out[0x14:0x18] = u32(0x10 + len(body))  # index_length, relative to 0x10
+    out[0x18:0x1C] = u32(0x10 + len(body))
+    out[0x1C] = 0  # no $INDEX_ALLOCATION
+    out[0x20 : 0x20 + len(body)] = body
+    return resident(ATTR_INDEX_ROOT, bytes(out), attr_id=4, name="$I30")
+
+
+def build_record(seq, flags, attributes):
+    rec = bytearray(RECORD)
+    rec[0:4] = b"FILE"
+    rec[4:6] = u16(0x30)  # update sequence array offset
+    rec[6:8] = u16(RECORD // SECTOR + 1)
+    rec[0x10:0x12] = u16(seq)
+    rec[0x12:0x14] = u16(1)
+    rec[0x14:0x16] = u16(0x38)  # first attribute offset
+    rec[0x16:0x18] = u16(flags)
+    rec[0x1C:0x20] = u32(RECORD)
+    pos = 0x38
+    for attr in attributes:
+        rec[pos : pos + len(attr)] = attr
+        pos += len(attr)
+    rec[pos : pos + 4] = b"\xff\xff\xff\xff"
+    pos += 8
+    rec[0x18:0x1C] = u32(pos)
+
+    # Apply the update sequence array last: every sector's trailing two bytes
+    # move into the array and are replaced by the sequence number.
+    usn = 0x0001
+    sectors = RECORD // SECTOR
+    saved = []
+    for i in range(sectors):
+        tail = (i + 1) * SECTOR
+        saved.append(bytes(rec[tail - 2 : tail]))
+    rec[0x30:0x32] = u16(usn)
+    for i, value in enumerate(saved):
+        rec[0x32 + i * 2 : 0x34 + i * 2] = value
+    for i in range(sectors):
+        tail = (i + 1) * SECTOR
+        rec[tail - 2 : tail] = u16(usn)
+    return bytes(rec)
+
+
+def lznt1_compress_repeated(byte_value, size):
+    """Compress `size` copies of one byte into a single LZNT1 chunk.
+
+    Only used for the fixture, so it deliberately implements just the
+    "first literal, then distance-1 phrases" shape.
+    """
+    assert size <= 4096
+    body = bytearray()
+    tokens = [(False, byte_value)]
+    produced = 1
+    while produced < size:
+        remaining = size - produced
+        take = min(18, remaining)
+        if take < 3:
+            for _ in range(take):
+                tokens.append((False, byte_value))
+                produced += 1
+        else:
+            tokens.append((True, (take - 3, 0)))  # (length-3, distance-1)
+            produced += take
+    i = 0
+    while i < len(tokens):
+        group = tokens[i : i + 8]
+        flag = 0
+        for j, (is_phrase, _) in enumerate(group):
+            if is_phrase:
+                flag |= 1 << j
+        body.append(flag)
+        for is_phrase, value in group:
+            if is_phrase:
+                length, distance = value
+                token = (length << 12) | distance
+                body.append(token & 0xFF)
+                body.append((token >> 8) & 0xFF)
+            else:
+                body.append(value)
+        i += 8
+    header = 0x3000 | (2 + len(body) - 1) | 0x8000
+    return u16(header) + bytes(body)
+
+
+def build_boot():
+    boot = bytearray(SECTOR)
+    boot[0:3] = b"\xeb\x52\x90"
+    boot[3:11] = b"NTFS    "
+    boot[0x0B:0x0D] = u16(SECTOR)
+    boot[0x0D] = SECTOR // CLUSTER  # sectors per cluster
+    boot[0x28:0x30] = u64(TOTAL_CLUSTERS * CLUSTER // SECTOR)
+    boot[0x30:0x38] = u64(MFT_LCN)
+    boot[0x38:0x40] = u64(2)  # $MFTMirr location
+    boot[0x40] = 0xF6  # -10 => 1024-byte records
+    boot[0x41] = 1  # 1 cluster => 512-byte index records
+    boot[510:512] = b"\x55\xaa"
+    return bytes(boot)
+
+
+def build_image():
+    image = bytearray(TOTAL_CLUSTERS * CLUSTER)
+    image[0:SECTOR] = build_boot()
+
+    records = {}
+
+    # Record 0: $MFT itself. The runlist has to describe the region that is
+    # holding it, so the record count is fixed up front.
+    mft_runlist = bytes([0x11, MFT_CLUSTERS, MFT_LCN, 0x00])
+    records[0] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(0x06),
+            non_resident(
+                ATTR_DATA,
+                mft_runlist,
+                MFT_CLUSTERS * CLUSTER,
+                MFT_CLUSTERS * CLUSTER,
+                highest_vcn=MFT_CLUSTERS - 1,
+                attr_id=3,
+            ),
+        ],
+    )
+
+    # Record 5: root directory.
+    # Entries must be sorted by name (the index collation rule) and must
+    # point at the record that actually holds that file.
+    entries = [
+        index_entry(7, "big.bin", FILE_ATTRIBUTE_ARCHIVE, 1000),
+        index_entry(8, "compressed.txt", FILE_ATTRIBUTE_ARCHIVE, 1024),
+        index_entry(6, "hello.txt", FILE_ATTRIBUTE_ARCHIVE, 14),
+        index_entry(9, "sparse.bin", FILE_ATTRIBUTE_ARCHIVE, 512),
+    ]
+    records[5] = build_record(
+        1,
+        0x0003,
+        [
+            standard_information(FILE_ATTRIBUTE_DIRECTORY),
+            file_name(5, ".", FILE_ATTRIBUTE_DIRECTORY, 0),
+            index_root(entries),
+        ],
+    )
+
+    # Record 6: resident data.
+    records[6] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "hello.txt", FILE_ATTRIBUTE_ARCHIVE, 14),
+            resident(ATTR_DATA, b"hello, moonfs\n", attr_id=2),
+        ],
+    )
+
+    # Record 7: non-resident, two clusters.
+    records[7] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "big.bin", FILE_ATTRIBUTE_ARCHIVE, 1000),
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, DATA_BIG_CLUSTERS, DATA_BIG_LCN, 0x00]),
+                1000,
+                DATA_BIG_CLUSTERS * CLUSTER,
+                highest_vcn=DATA_BIG_CLUSTERS - 1,
+                attr_id=2,
+            ),
+        ],
+    )
+
+    # Record 8: compressed. One cluster holds a compression unit that expands
+    # to 1024 bytes; compression_unit = 1 means 2 clusters per unit.
+    records[8] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "compressed.txt", FILE_ATTRIBUTE_ARCHIVE, 1024),
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, 1, DATA_COMPRESSED_LCN, 0x00]),
+                1024,
+                CLUSTER,
+                flags=0x0001,
+                compression_unit=1,
+                highest_vcn=0,
+                attr_id=2,
+            ),
+        ],
+    )
+
+    # Record 9: sparse. The runlist holds one unallocated run, so every byte
+    # of the file must read back as zero.
+    records[9] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "sparse.bin", FILE_ATTRIBUTE_ARCHIVE, 512),
+            non_resident(
+                ATTR_DATA,
+                bytes([0x01, 1, 0x00]),
+                512,
+                0,
+                flags=0x8000,
+                highest_vcn=0,
+                attr_id=2,
+            ),
+        ],
+    )
+
+    mft_offset = MFT_LCN * CLUSTER
+    for number, payload in records.items():
+        at = mft_offset + number * RECORD
+        image[at : at + RECORD] = payload
+
+    # big.bin: 1000 deterministic bytes that are not all identical, so a
+    # wrong cluster number produces a visibly different result.
+    big = bytes(((i * 37 + 11) & 0xFF) for i in range(1000))
+    big_at = DATA_BIG_LCN * CLUSTER
+    image[big_at : big_at + len(big)] = big
+
+    # compressed.txt: 1024 copies of 'A', compressed into one cluster
+    compressed = lznt1_compress_repeated(ord("A"), 1024)
+    comp_at = DATA_COMPRESSED_LCN * CLUSTER
+    image[comp_at : comp_at + len(compressed)] = compressed
+
+    return bytes(image), big, compressed
+
+
+def main():
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("testdata/synth-ntfs.img")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    image, big, compressed = build_image()
+    out.write_bytes(image)
+    print(f"wrote {out} ({len(image)} bytes)")
+    print(f"  big.bin      : 1000 bytes, first 8 = {big[:8].hex()}")
+    print(f"  compressed   : {len(compressed)} bytes on disk -> 1024 bytes of 'A'")
+    print(f"  sparse       : 512 zero bytes, no allocation")
+
+
+if __name__ == "__main__":
+    main()
