@@ -11,9 +11,13 @@ Layout (cluster = 512 bytes, MFT record = 1024 bytes):
     LCN 1..32    $MFT, 16 records
     LCN 33..34   big.bin data (non-resident, 2 clusters)
     LCN 35       compressed.txt payload (LZNT1, occupies 1 cluster)
+    LCN 36..37   split.bin first extent   (record 10)
+    LCN 38..39   split.bin second extent  (record 11, not adjacent on purpose)
 
-The volume carries four files on purpose, one per data path the parser has
-to handle: resident, non-resident multi-cluster, LZNT1 compressed, sparse.
+The volume carries five files on purpose, one per data path the parser has
+to handle: resident, non-resident multi-cluster, LZNT1 compressed, sparse
+(allocated nowhere, reads as zero), and $DATA split across two MFT records
+and joined by a resident $ATTRIBUTE_LIST.
 """
 
 import struct

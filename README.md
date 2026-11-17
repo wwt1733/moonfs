@@ -1,6 +1,6 @@
 # moonfs
 
-**Pure MoonBit, FFI-free read-only filesystem image parser for NTFS and ext4.**
+**Pure MoonBit, FFI-free read-only filesystem image parser. NTFS 3.1 ships today; ext4 is next.**
 
 在浏览器里直接打开一块磁盘镜像，列出目录、读出文件——不需要挂载、不需要 root、不需要一个 C 库。
 
@@ -19,6 +19,18 @@ moon add wwt1733/moonfs
 3. **行为不统一。** 同一份解析代码在 native、JS、wasm 上的结果是否一致，没有统一答案。
 
 moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依赖 FFI，因此同一份代码可以在 native / JS / wasm-gc 后端上跑，并且可以在没有特权、没有挂载点的前提下直接读取镜像内容。
+
+## 分层结构
+
+解析分三层，每层只依赖上一层的输出，换一层不影响其他层：
+
+| 层 | 包 | 职责 | 可替换点 |
+| --- | --- | --- | --- |
+| 字节层 | `@block` | 镜像当只读字节源，越界即报错 | 数据源换成文件 / 内存 / wasm 宿主内存 |
+| 定位层 | `@partition` | MBR / GPT → 卷起始偏移 | 裸卷传 0，分区内卷传 `start_lba` |
+| 结构层 | `@ntfs`（二期 `@ext4`） | 卷内结构 → 目录树与文件流 | 换文件系统只换这一层 |
+
+两条路径都在 CI 里：`testdata/synth-ntfs.img` 是裸卷（引导扇区在偏移 0），`testdata/win-ntfs.img` 是分区内卷（MBR，起点 LBA 128），同一个 `Volume::open` 各跑一遍。
 
 ## 当前进度
 
@@ -138,7 +150,7 @@ moon test --target wasm-gc
 
 - **在真实 Windows 卷上验证。** `testdata/win-ntfs.img` 是 Windows 自己造出来的 NTFS 3.1 卷：`tools/make_windows_image.ps1` 用 `diskpart` 建固定 VHD、`format fs=ntfs` 格式化、写入四个文件、`compact /c` 施加真正的 LZNT1 压缩，再截掉 VHD 尾部 512 字节 footer 得到裸镜像。`tests/e2e/windows_test.mbt` 把四个文件的内容**在测试里重新算出来**逐字节比对，其中 `big.txt` 是 79 字节一行的 2593 次重复、经 LZNT1 压缩后只剩 28672 字节。
 - **算法单独钉死。** LZNT1 解压是纯函数，测试里内嵌了一段**从上面那块 Windows 卷里切出来的压缩块**（419 字节负载，还原 4096 字节）。这一条来自一次真实事故：早期实现把短语的"长度位/距离位"写死成 4/12 分栏，而合成镜像的编码器犯了同一个错，两边互相印证、测试全绿——直到真实数据进来才暴露。真实向量现在钉住了这个位置。
-- **镜像可重放。** `testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，18 KiB 的 NTFS 3.1 卷，根目录下四个文件分别走常驻、非常驻多段、LZNT1 压缩、稀疏四条路径。评审可以重跑脚本并比对字节，不必相信一个来路不明的二进制。
+- **镜像可重放。** `testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，20 KiB 的 NTFS 3.1 裸卷，根目录下五个文件，覆盖常驻、非常驻多段、LZNT1 压缩、稀疏、跨记录合并五条数据路径。评审可以重跑脚本并比对字节，不必相信一个来路不明的二进制。
 - **跨记录属性的样本。** 合成镜像里有一个 `split.bin`：它的 `$DATA` 被拆成两段、分放在两条 MFT 记录和两个不相邻的簇上，靠 `$ATTRIBUTE_LIST` 串起来。只读主记录不会报错——会给出一半内容。测试断言 2000 字节全对，顺序接错立刻失败。
 - **跨后端一致。** 同一套端到端断言（`tests/e2e`）在 native / JS / wasm-gc 三个后端各跑一遍。CI 还会在 wasm-gc 下真正执行 `export`，把解出的内容与生成器写入的值逐字节比对——如果压缩解压只在 native 正确，这一步会挂。
 - **与外部实现对照。** `compact` 报告 `big.txt` 占用 28672 字节、`mixed.bin` 占用 12288 字节，与本项目从 runlist 算出的物理占用一致；`ls` 的逻辑大小、压缩标志也与 Windows 侧写入的值一致。
