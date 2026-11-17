@@ -44,3 +44,25 @@ jobs:
 
       - name: CLI smoke test
         run: moon run cmd/main --target wasm-gc -- info testdata/mbr-ntfs.img
+
+      - name: End-to-end on the generated NTFS image
+        run: |
+          moon run cmd/main --target wasm-gc -- ls testdata/synth-ntfs.img / | tee ls.txt
+          grep -q "hello.txt" ls.txt
+          grep -q "compressed.txt" ls.txt
+          grep -q "compressed" ls.txt
+          grep -q "sparse" ls.txt
+          moon run cmd/main --target wasm-gc -- export testdata/synth-ntfs.img /compressed.txt out-comp.bin
+          moon run cmd/main --target wasm-gc -- export testdata/synth-ntfs.img /big.bin out-big.bin
+          moon run cmd/main --target wasm-gc -- export testdata/synth-ntfs.img /sparse.bin out-sparse.bin
+          python3 - <<'PY'
+          comp = open("out-comp.bin", "rb").read()
+          assert len(comp) == 1024, f"compressed length {len(comp)}"
+          assert comp == b"A" * 1024, "decompressed payload differs from the original"
+          big = open("out-big.bin", "rb").read()
+          assert len(big) == 1000, f"big.bin length {len(big)}"
+          assert big == bytes((i * 37 + 11) & 0xFF for i in range(1000)), "big.bin differs"
+          sparse = open("out-sparse.bin", "rb").read()
+          assert sparse == bytes(512), "sparse file did not read back as zeros"
+          print("compressed, non-resident and sparse payloads verified")
+          PY
