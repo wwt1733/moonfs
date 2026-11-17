@@ -9,6 +9,18 @@ pub suberror NtfsError {
   Corrupt(reason~ : String)
   /// 底层镜像读取失败。
   Io(reason~ : String)
+  /// 遇到了实现范围之外的格式特性。
+  ///
+  /// 与 `Corrupt` 的区别：`Corrupt` 表示"这块镜像坏了"，`Unsupported`
+  /// 表示"镜像没坏，但这个特性本期不处理"。分开是为了让调用方能区分
+  /// 该重试、该报错，还是该换工具。
+  Unsupported(feature~ : String)
+  /// 内容被 EFS 加密。
+  ///
+  /// 解密需要用户的证书与私钥，离线镜像解析器拿不到，因此这是物理上
+  /// 不可行而非实现偷懒。带上路径是为了让调用方能告诉用户"哪个文件
+  /// 读不了"，而不是整个卷失败。
+  Encrypted(path~ : String)
 }
 
 ///|
@@ -41,6 +53,13 @@ fn rd_u8(buf : Bytes, off : Int32) -> Int64 raise NtfsError {
 ///|
 fn rd_u16(buf : Bytes, off : Int32) -> Int64 raise NtfsError {
   @binio.u16le(buf, off) catch {
+    _ => raise Corrupt(reason="field read out of range at " + off.to_string())
+  }
+}
+
+///|
+fn rd_u32(buf : Bytes, off : Int32) -> Int64 raise NtfsError {
+  @binio.u32le(buf, off) catch {
     _ => raise Corrupt(reason="field read out of range at " + off.to_string())
   }
 }
@@ -165,4 +184,17 @@ pub fn Volume::cluster_offset(self : Volume, lcn : Int64) -> Int64 {
 /// MFT 在镜像内的字节偏移。
 pub fn Volume::mft_offset(self : Volume) -> Int64 {
   self.cluster_offset(self.mft_lcn)
+}
+
+///|
+/// 把 NTFS 错误转成一行描述，供 CLI 与测试使用。
+pub fn describe_error(err : NtfsError) -> String {
+  match err {
+    NotNtfs => "not an NTFS volume (OEM identifier mismatch)"
+    BadGeometry(reason~) => "bad geometry: " + reason
+    Corrupt(reason~) => "corrupt: " + reason
+    Io(reason~) => "io: " + reason
+    Unsupported(feature~) => "unsupported: " + feature
+    Encrypted(path~) => "encrypted: " + path
+  }
 }
