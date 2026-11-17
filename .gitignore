@@ -8,3 +8,6 @@ native-test.log
 docs/proposal.submit.md
 out-*.bin
 ls.txt
+w-*.out
+j-*.out
+chunk_hex.txt

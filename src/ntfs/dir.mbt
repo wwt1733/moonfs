@@ -145,6 +145,7 @@ pub fn list_directory(
       while index * block < cover {
         let bytes = read_from_runs(
           img,
+          vol.base_offset,
           vol.cluster_size,
           runs,
           index * block,

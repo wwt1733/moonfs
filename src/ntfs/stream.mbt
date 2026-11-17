@@ -24,7 +24,14 @@ pub fn read_attribute_data(
   if attr.is_compressed() {
     read_compressed(img, vol, attr, runs)
   } else {
-    read_from_runs(img, vol.cluster_size, runs, 0L, attr.data_size)
+    read_from_runs(
+      img,
+      vol.base_offset,
+      vol.cluster_size,
+      runs,
+      0L,
+      attr.data_size,
+    )
   }
 }
 
@@ -58,16 +65,29 @@ pub fn stat_record(
   let attrs = parse_attributes(fixed, header.used_size)
   reject_attribute_list(attrs, label)
   match find_named_attribute(attrs, ATTR_DATA, "") {
-    Some(attr) =>
+    Some(attr) => {
+      // 物理占用按 runlist 里非稀疏簇的合计算，而不是读属性头 0x28。
+      //
+      // 压缩属性的 0x28 存的是「按压缩单元向上取整后的虚拟分配」：一个
+      // 204847 字节、压缩率 7:1 的文件，0x28 写 262144（64 簇），而它
+      // 实际只占 7 簇 = 28672 字节——`compact` 报的正是后者。照 0x28 显示
+      // 会让压缩文件看起来比原文还占地方，与事实相反。
+      let allocated = if attr.non_resident {
+        allocated_clusters(runlist_of(attr, fixed)) *
+        vol.cluster_size.to_int64()
+      } else {
+        attr.allocated_size
+      }
       {
         number,
         logical_size: attr.data_size,
-        allocated_size: attr.allocated_size,
+        allocated_size: allocated,
         compressed: attr.is_compressed(),
         encrypted: attr.is_encrypted(),
         sparse: attr.is_sparse(),
         is_directory: header.is_directory(),
       }
+    }
     None =>
       {
         number,

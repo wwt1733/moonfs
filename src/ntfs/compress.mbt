@@ -34,7 +34,14 @@ pub fn read_compressed(
   while unit * unit_bytes < total {
     let start_vcn = unit * unit_clusters
     let end_vcn = start_vcn + unit_clusters
-    let collected = collect_unit(img, cluster, runs, start_vcn, end_vcn)
+    let collected = collect_unit(
+      img,
+      vol.base_offset,
+      cluster,
+      runs,
+      start_vcn,
+      end_vcn,
+    )
     let remain = total - unit * unit_bytes
     let want = if remain > unit_bytes { unit_bytes } else { remain }
     let want_len = want.to_int()
@@ -53,8 +60,9 @@ pub fn read_compressed(
         i = i + 1
       }
     } else {
-      // 情形 3：解压。最后一块可能不足一个单元，因此按 want 截断
-      let raw = decompress(Bytes::from_array(collected)) catch {
+      // 情形 3：解压。上限给一个完整单元，最后一块可能不足一个单元，
+      // 因此按 want 截断
+      let raw = decompress(Bytes::from_array(collected), unit_bytes.to_int()) catch {
         err =>
           raise Corrupt(
             reason="cannot decompress the unit at VCN " +
@@ -87,6 +95,7 @@ pub fn read_compressed(
 /// 的区别在于拼接后是否参与 LZNT1 解压。
 fn collect_unit(
   img : @block.Image,
+  base_offset : Int64,
   cluster_size : Int64,
   runs : Array[Run],
   start_vcn : Int64,
@@ -105,7 +114,10 @@ fn collect_unit(
     let to = if run_end < end_vcn { run_end } else { end_vcn }
     let count = to - from
     let lcn = run.lcn + (from - run.vcn)
-    let bytes = img.read(lcn * cluster_size, (count * cluster_size).to_int()) catch {
+    let bytes = img.read(
+      base_offset + lcn * cluster_size,
+      (count * cluster_size).to_int(),
+    ) catch {
       err =>
         raise Io(reason="cannot read compressed unit: " + @block.reason_of(err))
     }

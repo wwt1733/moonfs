@@ -214,26 +214,45 @@ def build_record(seq, flags, attributes):
     return bytes(rec)
 
 
+def _disp_bits(pos):
+    """Bits used for the distance field when `pos` bytes are already produced.
+
+    The phrase token is split dynamically: the distance field is
+    ceil(log2(pos)) bits wide (minimum 4), and the length field takes the
+    rest. Getting this wrong is invisible until you feed real Windows data
+    through the decoder, because a hand-written encoder and decoder can
+    agree on the same misreading.
+    """
+    bits = 0
+    span = 1
+    while span < pos:
+        span *= 2
+        bits += 1
+    return max(4, bits)
+
+
 def lznt1_compress_repeated(byte_value, size):
     """Compress `size` copies of one byte into a single LZNT1 chunk.
 
     Only used for the fixture, so it deliberately implements just the
     "first literal, then distance-1 phrases" shape.
     """
-    assert size <= 4096
-    body = bytearray()
-    tokens = [(False, byte_value)]
+    assert 0 < size <= 4096
+    tokens = [(False, bytes([byte_value]))]
     produced = 1
     while produced < size:
-        remaining = size - produced
-        take = min(18, remaining)
+        split = 16 - _disp_bits(produced)
+        max_len = ((1 << split) - 1) + 3
+        take = min(max_len, size - produced)
         if take < 3:
-            for _ in range(take):
-                tokens.append((False, byte_value))
-                produced += 1
+            tokens.append((False, bytes([byte_value])))
+            produced += 1
         else:
-            tokens.append((True, (take - 3, 0)))  # (length-3, distance-1)
+            # token = ((distance - 1) << split) | (length - 3)
+            tokens.append((True, u16(take - 3)))
             produced += take
+
+    body = bytearray()
     i = 0
     while i < len(tokens):
         group = tokens[i : i + 8]
@@ -242,16 +261,12 @@ def lznt1_compress_repeated(byte_value, size):
             if is_phrase:
                 flag |= 1 << j
         body.append(flag)
-        for is_phrase, value in group:
-            if is_phrase:
-                length, distance = value
-                token = (length << 12) | distance
-                body.append(token & 0xFF)
-                body.append((token >> 8) & 0xFF)
-            else:
-                body.append(value)
+        for is_phrase, payload in group:
+            body += payload
         i += 8
-    header = 0x3000 | (2 + len(body) - 1) | 0x8000
+
+    # 低 12 位是负载长度（不含 2 字节块头），bit15 = 已压缩，bit12-14 = 0b011
+    header = 0x8000 | 0x3000 | (len(body) - 1)
     return u16(header) + bytes(body)
 
 
@@ -265,7 +280,11 @@ def build_boot():
     boot[0x30:0x38] = u64(MFT_LCN)
     boot[0x38:0x40] = u64(2)  # $MFTMirr location
     boot[0x40] = 0xF6  # -10 => 1024-byte records
-    boot[0x41] = 1  # 1 cluster => 512-byte index records
+    # clusters-per-index-buffer lives at 0x44; 0x41..0x43 are unused bytes that
+    # Windows writes as zero. Leaving 0x41 untouched keeps this fixture shaped
+    # like a real volume instead of hiding an offset bug.
+    boot[0x44] = 1  # 1 cluster => 512-byte index records
+    boot[0x48:0x50] = u64(0x4D4F4F4E46530001)  # volume serial, ours
     boot[510:512] = b"\x55\xaa"
     return bytes(boot)
 

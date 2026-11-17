@@ -115,6 +115,23 @@ fn cmd_partitions(path : String) -> Unit {
 }
 
 ///|
+/// 把卷序列号格式化成 Windows 的 `dir` 那样：8 位十六进制，中间一个连字符。
+fn hex_serial(serial : Int64) -> String {
+  let chars : Array[Char] = []
+  for i in 0..<8 {
+    if i == 4 {
+      chars.push('-')
+    }
+    let nibble = ((serial >> ((7 - i) * 4)) & 0xFL).to_int()
+    let code = if nibble < 10 { 48 + nibble } else { 55 + nibble }
+    if code.to_char() is Some(c) {
+      chars.push(c)
+    }
+  }
+  String::from_array(chars)
+}
+
+///|
 fn cmd_info(path : String) -> Unit {
   match read_image(path) {
     Err(message) => fail(message)
@@ -142,8 +159,10 @@ fn cmd_info(path : String) -> Unit {
           volume.cluster_size.to_string() +
           " B  mft_record=" +
           volume.mft_record_size.to_string() +
-          " B  mft_lcn=" +
-          volume.mft_lcn.to_string(),
+          " B  index_record=" +
+          volume.index_record_size.to_string() +
+          " B  serial=" +
+          hex_serial(volume.serial_number),
         )
       }
     }
@@ -285,7 +304,7 @@ fn describe_entry(
   if info.encrypted {
     marks = marks + " encrypted"
   }
-  pad_right(entry.name, 24) +
+  pad_right(entry.name, 28) +
   pad_right(info.logical_size.to_string() + " B", 14) +
   marks
 }
@@ -322,6 +341,10 @@ fn cmd_ls(image_path : String, sub_path : String) -> Unit {
         }
       }
       for entry in entries {
+        // "." 和 ".." 是目录自引用，不是子项；Windows 资源管理器也不显示
+        if entry.name == "." || entry.name == ".." {
+          continue
+        }
         println(describe_entry(img, vol, mft, entry))
       }
     }

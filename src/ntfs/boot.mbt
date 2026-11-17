@@ -37,6 +37,14 @@ pub(all) struct Volume {
   mft_mirror_lcn : Int64
   mft_record_size : Int32
   index_record_size : Int32
+  /// 卷在镜像内的字节起点（分区起始扇区 × 扇区大小）。
+  ///
+  /// 卷内所有 LCN 都是相对这个起点算的。整盘镜像上分区不是从 0 开始时，
+  /// 漏加这个偏移会把别处的数据当成 MFT 读。
+  base_offset : Int64
+  /// 卷序列号。Windows 的 `dir` 里显示为 "Volume Serial Number"，
+  /// 用来确认读到的确实是那块卷而不是同尺寸的另一块。
+  serial_number : Int64
 }
 
 ///|
@@ -123,7 +131,8 @@ pub fn Volume::open(
   let boot = img.read(offset, 512) catch {
     err => raise Io(reason="cannot read boot sector: " + @block.reason_of(err))
   }
-  parse_boot_sector(boot)
+  let parsed = parse_boot_sector(boot)
+  { ..parsed, base_offset: offset, }
 }
 
 ///|
@@ -164,7 +173,12 @@ pub fn parse_boot_sector(boot : Bytes) -> Volume raise NtfsError {
     mft_lcn,
     mft_mirror_lcn,
     mft_record_size: record_size(rd_u8(boot, 0x40), cluster_size.to_int()),
-    index_record_size: record_size(rd_u8(boot, 0x41), cluster_size.to_int()),
+    // 索引缓冲区大小在 0x44。0x41..0x43 是 clusters-per-MFT-record 之后的
+    // 三个未使用字节，Windows 在那里写 0；误读成 0x41 会让 record_size()
+    // 判定为非法编码，整卷打不开。真实 Windows 卷上就是这样暴露的。
+    index_record_size: record_size(rd_u8(boot, 0x44), cluster_size.to_int()),
+    base_offset: 0L,
+    serial_number: rd_i64(boot, 0x48),
   }
 }
 
@@ -176,8 +190,10 @@ pub fn Volume::size(self : Volume) -> Int64 {
 
 ///|
 /// 某个逻辑簇在镜像内的字节偏移。
+///
+/// 含卷基址：分区不在 0 位置时，LCN 0 也不在镜像 0 位置。
 pub fn Volume::cluster_offset(self : Volume, lcn : Int64) -> Int64 {
-  lcn * self.cluster_size.to_int64()
+  self.base_offset + lcn * self.cluster_size.to_int64()
 }
 
 ///|

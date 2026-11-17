@@ -22,6 +22,8 @@ fn cz_volume() -> @ntfs.Volume {
     mft_mirror_lcn: 2L,
     mft_record_size: 1024,
     index_record_size: 4096,
+    base_offset: 0L,
+    serial_number: 0L,
   }
 }
 

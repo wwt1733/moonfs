@@ -46,7 +46,7 @@ fn ntfs_boot_sector(
   nb_i64le(arr, 0x30, mft_lcn)
   nb_i64le(arr, 0x38, mft_lcn + 8L)
   nb_u8(arr, 0x40, mft_record_clusters)
-  nb_u8(arr, 0x41, index_record_clusters)
+  nb_u8(arr, 0x44, index_record_clusters)
   nb_u16le(arr, 510, 0xAA55L)
   Bytes::from_array(arr)
 }
@@ -96,4 +96,50 @@ test "absurd sector size is rejected as bad geometry" {
   let boot = ntfs_boot_sector(1000L, 8L, 0x20000L, 4L, 0xF6L, 1L)
   let result = Ok(@ntfs.parse_boot_sector(boot)) catch { e => Err(e) }
   assert_true(result is Err(@ntfs.BadGeometry(_)))
+}
+
+///|
+test "index record size comes from 0x44, not the unused bytes at 0x41" {
+  // 真实 Windows 卷在 0x41..0x43 写 0。曾经误把 0x41 当作
+  // clusters-per-index-buffer，于是 record_size(0) 被判为非法编码，
+  // 整块卷打不开——而合成镜像恰好把 0x41 也写成有效值，测试一直是绿的。
+  // 这里往那三个未使用字节里塞垃圾，解析结果必须不受影响。
+  let arr = nb_zero(512)
+  let oem = b"NTFS    "
+  for i in 0..<8 {
+    arr[3 + i] = oem.at(i)
+  }
+  nb_u16le(arr, 0x0B, 512L)
+  nb_u8(arr, 0x0D, 8L)
+  nb_i64le(arr, 0x28, 0x20000L)
+  nb_i64le(arr, 0x30, 4L)
+  nb_i64le(arr, 0x38, 12L)
+  nb_u8(arr, 0x40, 0xF6L)
+  nb_u8(arr, 0x41, 0x07L)
+  nb_u8(arr, 0x42, 0x5AL)
+  nb_u8(arr, 0x43, 0xFFL)
+  nb_u8(arr, 0x44, 1L)
+  nb_u16le(arr, 510, 0xAA55L)
+  let vol = @ntfs.parse_boot_sector(Bytes::from_array(arr))
+  assert_eq(vol.index_record_size, 4096)
+}
+
+///|
+test "volume serial is read from 0x48" {
+  let arr = nb_zero(512)
+  let oem = b"NTFS    "
+  for i in 0..<8 {
+    arr[3 + i] = oem.at(i)
+  }
+  nb_u16le(arr, 0x0B, 512L)
+  nb_u8(arr, 0x0D, 8L)
+  nb_i64le(arr, 0x28, 0x20000L)
+  nb_i64le(arr, 0x30, 4L)
+  nb_i64le(arr, 0x38, 12L)
+  nb_u8(arr, 0x40, 0xF6L)
+  nb_u8(arr, 0x44, 1L)
+  nb_i64le(arr, 0x48, 0x1234ABCDL)
+  nb_u16le(arr, 510, 0xAA55L)
+  let vol = @ntfs.parse_boot_sector(Bytes::from_array(arr))
+  assert_eq(vol.serial_number, 0x1234ABCDL)
 }

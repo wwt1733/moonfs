@@ -87,6 +87,8 @@ pub fn RecordHeader::is_extension(self : RecordHeader) -> Bool {
 pub(all) struct Mft {
   cluster_size : Int32
   record_size : Int32
+  /// 卷在镜像内的字节起点，读取记录时必须带上。
+  base_offset : Int64
   runs : Array[Run]
 }
 
@@ -96,7 +98,7 @@ pub(all) struct Mft {
 /// 记录 0 必须能从 boot 里的 `mft_lcn` 直接定位，所以它占用的簇一定
 /// 连续——这正是用单条 `$DATA` 反推整个布局的前提。
 pub fn Mft::open(img : @block.Image, vol : Volume) -> Mft raise NtfsError {
-  let start = vol.mft_lcn * vol.cluster_size.to_int64()
+  let start = vol.mft_offset()
   let raw = img.read(start, vol.mft_record_size) catch {
     err => raise Io(reason="cannot read MFT record 0: " + @block.reason_of(err))
   }
@@ -111,7 +113,12 @@ pub fn Mft::open(img : @block.Image, vol : Volume) -> Mft raise NtfsError {
     raise Corrupt(reason="MFT is resident, which a real volume never allows")
   }
   let runs = runlist_of(data, fixed)
-  { cluster_size: vol.cluster_size, record_size: vol.mft_record_size, runs, }
+  {
+    cluster_size: vol.cluster_size,
+    record_size: vol.mft_record_size,
+    base_offset: vol.base_offset,
+    runs,
+  }
 }
 
 ///|
@@ -122,6 +129,7 @@ pub fn Mft::open(img : @block.Image, vol : Volume) -> Mft raise NtfsError {
 /// 本身不完整。
 pub fn read_from_runs(
   img : @block.Image,
+  base_offset : Int64,
   cluster_size : Int32,
   runs : Array[Run],
   byte_offset : Int64,
@@ -140,7 +148,7 @@ pub fn read_from_runs(
     }
     match lookup_cluster(runs, vcn) {
       Some(Some(lcn)) => {
-        let at = lcn * cluster + in_cluster
+        let at = base_offset + lcn * cluster + in_cluster
         let bytes = img.read(at, chunk.to_int()) catch {
           err =>
             raise Io(
@@ -179,6 +187,7 @@ pub fn Mft::read_record(
   let offset = number * self.record_size.to_int64()
   read_from_runs(
     img,
+    self.base_offset,
     self.cluster_size,
     self.runs,
     offset,

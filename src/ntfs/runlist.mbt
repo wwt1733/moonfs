@@ -122,6 +122,21 @@ pub fn total_clusters(runs : Array[Run]) -> Int64 {
 }
 
 ///|
+/// runlist 真正占用的物理簇数：稀疏段不计。
+///
+/// 和 `total_clusters` 的区别在稀疏与压缩文件上才看得出来——那些文件的
+/// 虚拟跨度远大于实际占用。
+pub fn allocated_clusters(runs : Array[Run]) -> Int64 {
+  let mut total = 0L
+  for run in runs {
+    if !run.sparse {
+      total = total + run.clusters
+    }
+  }
+  total
+}
+
+///|
 /// 在 runlist 里查某个虚拟簇落在哪。
 ///
 /// 返回 `None` 表示该 VCN 超出 runlist 覆盖范围；返回 `Some(None)` 表示
