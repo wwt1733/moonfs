@@ -109,7 +109,7 @@ ext4 不在本期交付范围内。后续实现时不按"内核版本"声明支�
 
 ## 当前进度
 
-仓库已建，CI 在跑，`moon test` **58 个用例在 wasm-gc 与 js 两个后端全绿**（native 在 CI 的 ubuntu 上跑）：
+仓库已建，CI 在跑，`moon test` **58 个用例在 native / js / wasm-gc 三个后端全绿**（native 由 CI 在 ubuntu 上验证）：
 
 - 字节层、`Image` 镜像访问、MBR / GPT 分区表、NTFS 卷头
 - MFT 记录与 USA 修复、属性链遍历、runlist 解码（含稀疏段与有符号增量）
