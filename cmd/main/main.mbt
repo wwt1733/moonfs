@@ -84,13 +84,23 @@ fn read_image(path : String) -> Result[@block.Image, String] {
 }
 
 ///|
+/// 打印错误并以非零状态退出。
+///
+/// 退出码不是装饰：CI 和脚本靠它判断成败。只打印不退出会让调用方以为
+/// 命令成功了，而实际上什么都没读到。
+fn fail(message : String) -> Unit {
+  println("error: " + message)
+  let _ : Unit = @env.exit(1)
+}
+
+///|
 fn cmd_partitions(path : String) -> Unit {
   match read_image(path) {
-    Err(message) => println("error: " + message)
+    Err(message) => fail(message)
     Ok(img) => {
       let result = Ok(@partition.read(img)) catch { e => Err(e) }
       match result {
-        Err(err) => println("error: " + partition_error_text(err))
+        Err(err) => fail(partition_error_text(err))
         Ok(parts) =>
           if parts.length() == 0 {
             println("no partitions found")
@@ -107,7 +117,7 @@ fn cmd_partitions(path : String) -> Unit {
 ///|
 fn cmd_info(path : String) -> Unit {
   match read_image(path) {
-    Err(message) => println("error: " + message)
+    Err(message) => fail(message)
     Ok(img) => {
       println("image:      " + path)
       println("size:       " + format_size(img.size()))
@@ -283,31 +293,31 @@ fn describe_entry(
 ///|
 fn cmd_ls(image_path : String, sub_path : String) -> Unit {
   match read_image(image_path) {
-    Err(message) => println("error: " + message)
+    Err(message) => fail(message)
     Ok(img) => {
       let vol = match open_volume(img) {
         Ok(v) => v
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let mft = @ntfs.Mft::open(img, vol) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }
       let number = match resolve_path(img, vol, mft, sub_path) {
         Ok(n) => n
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let entries = @ntfs.list_directory(img, vol, mft, number) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }
@@ -321,31 +331,31 @@ fn cmd_ls(image_path : String, sub_path : String) -> Unit {
 ///|
 fn cmd_cat(image_path : String, sub_path : String) -> Unit {
   match read_image(image_path) {
-    Err(message) => println("error: " + message)
+    Err(message) => fail(message)
     Ok(img) => {
       let vol = match open_volume(img) {
         Ok(v) => v
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let mft = @ntfs.Mft::open(img, vol) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }
       let number = match resolve_path(img, vol, mft, sub_path) {
         Ok(n) => n
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let data = @ntfs.read_file(img, vol, mft, number) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }
@@ -361,31 +371,31 @@ fn cmd_export(
   out_path : String,
 ) -> Unit {
   match read_image(image_path) {
-    Err(message) => println("error: " + message)
+    Err(message) => fail(message)
     Ok(img) => {
       let vol = match open_volume(img) {
         Ok(v) => v
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let mft = @ntfs.Mft::open(img, vol) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }
       let number = match resolve_path(img, vol, mft, sub_path) {
         Ok(n) => n
         Err(message) => {
-          println("error: " + message)
+          fail(message)
           return
         }
       }
       let data = @ntfs.read_file(img, vol, mft, number) catch {
         err => {
-          println("error: " + ntfs_error_text(err))
+          fail(ntfs_error_text(err))
           return
         }
       }

@@ -39,14 +39,31 @@ fn entry_named(
 test "合成镜像：根目录四个条目，大小与生成器一致" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   assert_eq(entries.length(), 4)
   let expected = [
     ("big.bin", 1000L),
@@ -72,20 +89,43 @@ test "合成镜像：根目录四个条目，大小与生成器一致" {
 test "合成镜像：常驻数据逐字节正确" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   let entry = match entry_named(entries, "hello.txt") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   assert_eq(data.length(), 14)
   assert_eq(@utf8.decode_lossy(data), "hello, moonfs\n")
@@ -95,20 +135,43 @@ test "合成镜像：常驻数据逐字节正确" {
 test "合成镜像：非常驻数据跨簇拼接" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   let entry = match entry_named(entries, "big.bin") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   // 生成器的填充公式是 (i * 37 + 11) & 0xFF
   assert_eq(data.length(), 1000)
@@ -126,20 +189,43 @@ test "合成镜像：非常驻数据跨簇拼接" {
 test "合成镜像：压缩文件解压后与原始内容一致" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   let entry = match entry_named(entries, "compressed.txt") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   assert_eq(data.length(), 1024)
   let mut ok = true
@@ -155,20 +241,43 @@ test "合成镜像：压缩文件解压后与原始内容一致" {
 test "合成镜像：稀疏区间读作零" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   let entry = match entry_named(entries, "sparse.bin") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   assert_eq(data.length(), 512)
   let mut ok = true
@@ -184,20 +293,43 @@ test "合成镜像：稀疏区间读作零" {
 test "合成镜像：stat 报告压缩与稀疏标志" {
   let img = match load_image() {
     Some(v) => v
-    None => return
+    None => {
+      // 读不到测试镜像就是失败：静默 return 会让测试"通过"却没验证任何东西
+      assert_true(false)
+      return
+    }
   }
   let vol = match open_volume(img) {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
-  let mft = @ntfs.Mft::open(img, vol) catch { _ => return }
-  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch { _ => return }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
   let compressed = match entry_named(entries, "compressed.txt") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let info = @ntfs.stat_record(img, vol, mft, compressed.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   assert_true(info.compressed)
   assert_eq(info.logical_size, 1024L)
@@ -205,10 +337,16 @@ test "合成镜像：stat 报告压缩与稀疏标志" {
 
   let sparse = match entry_named(entries, "sparse.bin") {
     Some(v) => v
-    None => return
+    None => {
+      assert_true(false)
+      return
+    }
   }
   let sparse_info = @ntfs.stat_record(img, vol, mft, sparse.record_number) catch {
-    _ => return
+    _ => {
+      assert_true(false)
+      return
+    }
   }
   assert_true(sparse_info.sparse)
   assert_eq(sparse_info.allocated_size, 0L)
