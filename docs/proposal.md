@@ -60,7 +60,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | `split.bin` | `$DATA` 两段，分放两条 MFT 记录与不相邻簇 | 2000 / 2048 B | **2000 字节**，按 VCN 拼好 |
 | `deep.bin` | 同上，且 `$ATTRIBUTE_LIST` 自己也搬到簇上（非常驻） | 2000 / 2048 B | **2000 字节**，列表先从簇上读出再合并 |
 
-`ls /` 列出全部六个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；EFS 文件返回 `Encrypted(path=...)`、退出码非零、不输出密文；三个后端输出与退出码一致。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
+`ls /` 列出全部六个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；三个后端输出与退出码一致。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
 
 ### 代表性案例：列表自己也要从簇上读
 
@@ -74,6 +74,8 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | `synth-mft-split.img` | `$MFT` 的 `$DATA` 拆两段（LCN 10..17 / 20..27），列表非常驻；根目录记录 5 与文件记录 6 都在第二段 | `ls /` 得 `after.bin`，`cat` 得 29 字节 | 只剩第一段，**根目录都读不出** |
 
 两条断言都在 CI 里跑；把修复回退后它们会分别报 “MFT runs = 1” 和 “2 != 4”，不是靠肉眼确认。
+
+唯一读不出来的是 EFS：`synth-mft-split.img` 里的 `secret.bin` 带加密标志，`cat` 返回 `encrypted: MFT record 7`、退出码非零，CI 还断言输出里不含明文。这不是范围取舍——解密要用户证书与私钥，离线解析拿不到，任何工具都读不出；能选的只是失败方式：明确报错，还是把密文当内容返回。
 
 ### 真实 Windows 卷
 
@@ -99,5 +101,5 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 七、当前进度与原创性
 
-- 仓库已建，GitHub 与 GitLink 同步；`moon test` **65 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 下实测。
+- 仓库已建，GitHub 与 GitLink 同步；`moon test` **66 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 下实测。
 - **原创性**：依据 `[MS-FSCC]` / `[MS-DOS]` / `[MS-XCA]`（LZNT1）与 linux-ntfs 公开文档编写，未复制任何现有实现；模块划分上参考了 Rust `ntfs` crate（MIT）与 `ext4-view` 的思路。非移植项目，许可证 Apache-2.0。

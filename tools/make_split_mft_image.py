@@ -18,6 +18,10 @@ Layout (cluster = 512 bytes, MFT record = 1024 bytes):
     LCN 20..27   $MFT run 1, records 4..7   (VCN 8..15)
     LCN 30       $ATTRIBUTE_LIST of $MFT (non-resident)
 
+Record 7 carries an EFS-encrypted file: the bytes an offline parser can see
+are ciphertext, so the reader must fail loudly instead of handing them back
+as if they were the file.
+
 Record 5 (the root directory) and record 6 (a file) live in the *second*
 run, so nothing about them can be read until the two runs are joined. A
 reader that only believes record 0 sees a runlist that stops at VCN 7 and
@@ -63,7 +67,9 @@ FILE_NAME = "after.bin"
 FILE_BODY = b"read from the second MFT run\n"
 ROOT_RECORD = 5
 FILE_RECORD = 6
+SECRET_RECORD = 7
 MFT_EXT_RECORD = 1
+SECRET_BODY = b"EFS ciphertext!!"
 
 
 def boot():
@@ -151,7 +157,13 @@ def build():
                 [
                     index_entry(
                         FILE_RECORD, FILE_NAME, FILE_ATTRIBUTE_ARCHIVE, len(FILE_BODY)
-                    )
+                    ),
+                    index_entry(
+                        SECRET_RECORD,
+                        "secret.bin",
+                        FILE_ATTRIBUTE_ARCHIVE,
+                        len(SECRET_BODY),
+                    ),
                 ]
             ),
         ],
@@ -163,6 +175,18 @@ def build():
             standard_information(FILE_ATTRIBUTE_ARCHIVE),
             file_name(ROOT_RECORD, FILE_NAME, FILE_ATTRIBUTE_ARCHIVE, len(FILE_BODY)),
             resident(ATTR_DATA, FILE_BODY, attr_id=2),
+        ],
+    )
+
+    # Record 7: EFS-encrypted. Returning the bytes would let the caller
+    # believe it read the file, so read_attribute_data must raise instead.
+    records[SECRET_RECORD] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(ROOT_RECORD, "secret.bin", FILE_ATTRIBUTE_ARCHIVE, len(SECRET_BODY)),
+            resident(ATTR_DATA, SECRET_BODY, flags=0x4000, attr_id=2),
         ],
     )
 

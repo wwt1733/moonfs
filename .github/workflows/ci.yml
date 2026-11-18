@@ -69,6 +69,16 @@ jobs:
           run_cli ls testdata/synth-mft-split.img / | tee ls-split.txt
           grep -q "after.bin" ls-split.txt
           run_cli export testdata/synth-mft-split.img /after.bin out-after.bin
+          # EFS 文件：必须是明确的错误 + 非零退出码，不能把密文当内容吐出来
+          if run_cli cat testdata/synth-mft-split.img /secret.bin > secret.txt 2>&1; then
+            echo "reading an EFS file must fail" >&2
+            exit 1
+          fi
+          grep -q "encrypted" secret.txt
+          if grep -q "EFS ciphertext" secret.txt; then
+            echo "ciphertext leaked into the output" >&2
+            exit 1
+          fi
           python3 - <<'PY'
           comp = open("out-comp.bin", "rb").read()
           assert len(comp) == 1024, f"compressed length {len(comp)}"
