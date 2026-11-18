@@ -39,7 +39,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 | 层 | 终点 | 判据 |
 | --- | --- | --- |
-| 元数据 | 镜像字节 → 完整目录树 | 每条给出路径、逻辑大小、占用大小、时间戳、压缩/稀疏标志、MFT 记录号 |
+| 元数据 | 镜像字节 → 完整目录树 | 每条给出名字、MFT 记录号与序列号、逻辑 / 占用大小、三个时间戳、压缩 / 稀疏标志；路径由名字逐级拼出 |
 | 内容 | 任意文件 → 正确字节流 | 常驻、多段、稀疏、LZNT1、尾部不足一压缩单元、跨记录合并六种情形，逐字节等于原文件 |
 | 导出 | CLI 落盘 | `ls` 出目录树、`cat` 出内容、`export` 还原文件 |
 
@@ -101,5 +101,5 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 七、当前进度与原创性
 
-- 仓库已建，GitHub 与 GitLink 同步；`moon test` **67 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 与 js 下实测、输出逐行一致。
+- 仓库已建，GitHub 与 GitLink 同步；`moon test` **67 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成；CLI 五个子命令在 wasm-gc 与 js 下实测，`ls` / `info` 的完整输出在 CI 里逐行 diff。
 - **原创性**：依据 `[MS-FSCC]` / `[MS-DOS]` / `[MS-XCA]`（LZNT1）与 linux-ntfs 公开文档编写，未复制任何现有实现；模块划分上参考了 Rust `ntfs` crate（MIT）与 `ext4-view` 的思路。非移植项目，许可证 Apache-2.0。

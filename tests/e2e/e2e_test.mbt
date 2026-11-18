@@ -84,6 +84,9 @@ test "合成镜像：根目录六个条目，大小与生成器一致" {
     }
     assert_eq(entry.logical_size, size)
     assert_true(!entry.is_directory())
+    // 时间戳来自 $FILE_NAME。生成器写死 133000000000000000，四个时间字段
+    // 同值；这里钉住 created，字段读错位会立刻变成别的数
+    assert_eq(entry.created, 133000000000000000L)
   }
 }
 
