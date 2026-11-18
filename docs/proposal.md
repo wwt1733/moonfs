@@ -11,7 +11,7 @@ moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析�
 
 能读 NTFS 的实现几乎都是 C：Linux 侧 `ntfs-3g`（GPL）与内核驱动，Windows 侧 `libfsntfs`。它们要么要求挂载（root / 管理员），要么必须链接原生 ABI——**结果是 WebAssembly 里读不了一块磁盘镜像**。不是没人想做，是这些实现的形态决定了它们进不了 wasm。
 
-MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库——moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑，这不是把 C 库翻译一遍。查重：在 mooncakes.io 检索 `ntfs` / `ext4` 均为 **0** 命中；FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT，改为经统一卷接口对接它。
+MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库——moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑，这不是把 C 库翻译一遍。查重：在 mooncakes.io 检索 `ntfs` / `ext4` 均为 **0** 命中；FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT——需要时按第二节的字节 / 定位层对接它，不重写一遍。
 
 ## 二、通用性：三层可插拔
 
