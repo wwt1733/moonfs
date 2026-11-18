@@ -63,6 +63,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | **NTFS 压缩（LZNT1）解压** | **是** | 不适用 |
 | EFS / fscrypt 加密内容 | 明确返回 `Encrypted` 错误（CI 断言不吐密文） | 同 |
 | `$ATTRIBUTE_LIST` 跨记录属性 | **是**（常驻 / 非常驻列表都合并到主记录） | 不适用 |
+| 卷版本 `$VOLUME_INFORMATION` | **是**（`info` 打印，3.1） | 二期 |
 
 ## 目标格式版本
 
@@ -111,7 +112,7 @@ let data = @ntfs.read_file(img, vol, mft, entries[0].record_number)
 命令行：
 
 ```
-moonfs info <image>                 卷几何与分区数
+moonfs info <image>                 卷几何、NTFS 版本与分区数
 moonfs partitions <image>           分区表条目
 moonfs ls <image> [path]            列目录
 moonfs cat <image> <path>           输出文件内容
@@ -122,7 +123,11 @@ moonfs export <image> <path> <out>  把文件解出到本地
 
 ```
 $ moonfs info testdata/win-ntfs.img
-  #0 ntfs  cluster=4096 B  mft_record=1024 B  index_record=4096 B  serial=5400-82D4
+image:      testdata/win-ntfs.img
+size:       24 MiB
+sectors:    49152 x 512 B
+partitions: 1
+  #0 ntfs 3.1  cluster=4096 B  mft_record=1024 B  index_record=4096 B  serial=5400-82D4
 
 $ moonfs ls testdata/win-ntfs.img /
 $MFT                        262144 B
@@ -154,6 +159,8 @@ moon test --target wasm-gc
 - **跨记录属性的样本。** `split.bin` 的 `$DATA` 被拆成两段、分放在两条 MFT 记录和两个不相邻的簇上，靠常驻的 `$ATTRIBUTE_LIST` 串起来；`deep.bin` 更进一步，列表自己也搬到簇上，成为非常驻属性。只读主记录不会报错——会给出一半内容，所以两条都断言 2000 字节全对。
 - **MFT 自身被拆段。** `testdata/synth-mft-split.img` 由 `tools/make_split_mft_image.py` 生成：`$MFT` 的 `$DATA` 分成 LCN 10..17 与 20..27 两段，列表非常驻，根目录记录 5 与文件记录 6 都在第二段里。要读它们必须先解开「读扩展记录要 MFT、MFT 布局又在 MFT 里」这个循环——列表带着自己的 runlist，按普通数据读即可。回退修复后这条测试会报 `MFT runs = 1`。同一镜像里还有一个 `secret.bin`（EFS 加密标志）：读取必须抛 `Encrypted` 并带上路径，测试断言返回零字节——把密文当内容返回会让调用方以为读成功了。
 - **跨后端一致。** 同一套端到端断言（`tests/e2e`）在 native / JS / wasm-gc 三个后端各跑一遍。CI 还会在 wasm-gc 下真正执行 `export`，把解出的内容与生成器写入的值逐字节比对——如果压缩解压只在 native 正确，这一步会挂。
+- **CLI 输出跨后端逐行比对。** `ls` 与 `info` 在 wasm-gc 与 js 下各跑一次，`diff` 必须为空。这条不是形式主义：js 的 `process.argv` 会把解释器与脚本路径带进来，早先的 `main` 假定子命令固定在 `argv[1]`，在 js 上第一条命令就报 `unknown command`，而 wasm-gc 一切正常——不比对就发现不了。
+- **版本号来自磁盘，不是常量。** `$VOLUME_INFORMATION` 读出来的 3.1 在合成镜像与真实 Windows 卷上都要成立；后者是 Windows 自己写的值。
 - **与外部实现对照。** `compact` 报告 `big.txt` 占用 28672 字节、`mixed.bin` 占用 12288 字节，与本项目从 runlist 算出的物理占用一致；`ls` 的逻辑大小、压缩标志也与 Windows 侧写入的值一致。
 
 ## 参考与许可

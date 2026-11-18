@@ -51,10 +51,19 @@ jobs:
           # 每一步都套 timeout：万一某条命令挂住，让它在两分钟内失败并打印
           # 是哪一条，而不是把 job 卡到 GitHub 的默认上限。
           run_cli() {
-            echo "--- moonfs $* ---"
+            # 分隔线走 stderr：stdout 要留给命令本身的输出，否则和 js 的
+            # 输出 diff 时会多出这一行
+            echo "--- moonfs $* ---" >&2
             timeout --signal=KILL 120 moon run cmd/main --target wasm-gc -- "$@"
           }
           run_cli ls testdata/synth-ntfs.img / | tee ls.txt
+          # 换后端后输出必须逐字节一致。js 的 argv 带着脚本路径，这条曾经
+          # 在 js 上直接报 unknown command，而 wasm-gc 正常——不 diff 看不出来。
+          moon run cmd/main --target js -- ls testdata/synth-ntfs.img / > ls-js.txt
+          diff ls.txt ls-js.txt
+          run_cli info testdata/win-ntfs.img > info-gc.txt
+          moon run cmd/main --target js -- info testdata/win-ntfs.img > info-js.txt
+          diff info-gc.txt info-js.txt
           grep -q "hello.txt" ls.txt
           grep -q "compressed.txt" ls.txt
           grep -q "compressed" ls.txt

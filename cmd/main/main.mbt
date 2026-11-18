@@ -132,6 +132,37 @@ fn hex_serial(serial : Int64) -> String {
 }
 
 ///|
+/// 卷版本文本（`3.1` 这种）。读不出来时给 `?`，不影响其余几何信息——
+/// 一份镜像的簇大小照样有用，不该因为元文件缺失就什么都不打印。
+fn version_text(img : @block.Image, vol : @ntfs.Volume) -> String {
+  let mft = @ntfs.Mft::open(img, vol) catch { _ => return "?" }
+  let version = @ntfs.read_volume_version(img, vol, mft) catch {
+    _ => return "?"
+  }
+  version.major.to_string() + "." + version.minor.to_string()
+}
+
+///|
+/// 打印一个卷。识别不出 NTFS 卷头就安静跳过：镜像里可能只有分区表。
+fn print_volume(img : @block.Image, label : String, base_lba : Int64) -> Unit {
+  let volume = @ntfs.Volume::open(img, base_lba) catch { _ => return }
+  println(
+    "  " +
+    label +
+    " ntfs " +
+    version_text(img, volume) +
+    "  cluster=" +
+    volume.cluster_size.to_string() +
+    " B  mft_record=" +
+    volume.mft_record_size.to_string() +
+    " B  index_record=" +
+    volume.index_record_size.to_string() +
+    " B  serial=" +
+    hex_serial(volume.serial_number),
+  )
+}
+
+///|
 fn cmd_info(path : String) -> Unit {
   match read_image(path) {
     Err(message) => fail(message)
@@ -147,56 +178,66 @@ fn cmd_info(path : String) -> Unit {
       )
       let parts = @partition.read(img) catch { _ => [] }
       println("partitions: " + parts.length().to_string())
+      if parts.length() == 0 {
+        // 裸卷：没有分区表，卷就从偏移 0 开始
+        print_volume(img, "#0", 0L)
+      }
       for part in parts {
-        // 逐分区尝试识别 NTFS 卷头；识别不出来不算错误，镜像里可能只有分区表
-        let volume = @ntfs.Volume::open(img, part.start_lba) catch {
-          _ => continue
-        }
-        println(
-          "  #" +
-          part.index.to_string() +
-          " ntfs  cluster=" +
-          volume.cluster_size.to_string() +
-          " B  mft_record=" +
-          volume.mft_record_size.to_string() +
-          " B  index_record=" +
-          volume.index_record_size.to_string() +
-          " B  serial=" +
-          hex_serial(volume.serial_number),
-        )
+        print_volume(img, "#" + part.index.to_string(), part.start_lba)
       }
     }
   }
 }
 
 ///|
+fn is_command(name : String) -> Bool {
+  match name {
+    "info" | "partitions" | "ls" | "cat" | "export" => true
+    _ => false
+  }
+}
+
+///|
 fn main {
+  // 不同后端对 argv 的处理不一样：js 下 `process.argv` 会把解释器与脚本
+  // 路径都带进来，wasm-gc 下只有程序名。所以要找子命令本身，而不是假定
+  // 它固定在 args[1]——否则同一份源码在 js 上第一条命令就报 unknown。
   let args = @env.args()
-  if args.length() < 3 {
+  let mut start = 0
+  let mut found = false
+  while start < args.length() {
+    if is_command(args[start]) {
+      found = true
+      break
+    }
+    start = start + 1
+  }
+  if !found || args.length() < start + 2 {
     usage()
     return
   }
-  let command = args[1]
-  let path = args[2]
+  let command = args[start]
+  let path = args[start + 1]
   match command {
     "info" => cmd_info(path)
     "partitions" => cmd_partitions(path)
     "ls" => {
-      let sub = if args.length() > 3 { args[3] } else { "/" }
+      let sub = if args.length() > start + 2 { args[start + 2] } else { "/" }
       cmd_ls(path, sub)
     }
-    "cat" => if args.length() > 3 { cmd_cat(path, args[3]) } else { usage() }
-    "export" =>
-      if args.length() > 4 {
-        cmd_export(path, args[3], args[4])
+    "cat" =>
+      if args.length() > start + 2 {
+        cmd_cat(path, args[start + 2])
       } else {
         usage()
       }
-    _ => {
-      println("unknown command: " + command)
-      println("")
-      usage()
-    }
+    "export" =>
+      if args.length() > start + 3 {
+        cmd_export(path, args[start + 2], args[start + 3])
+      } else {
+        usage()
+      }
+    _ => usage()
   }
 }
 

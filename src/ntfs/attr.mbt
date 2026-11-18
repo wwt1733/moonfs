@@ -393,3 +393,25 @@ pub fn parse_volume_information(value : Bytes) -> VolumeVersion raise NtfsError 
     flags: rd_u16(value, 0x0A),
   }
 }
+
+///|
+/// 读卷版本：`$VOLUME` 记录（3 号）里的 `$VOLUME_INFORMATION`。
+///
+/// 版本号不是装饰：3.0 与 1.2 卷缺 `$Secure` 之类后加的元文件，先报出
+/// 版本次序再决定语义，比"按最新布局硬解"安全。
+pub fn read_volume_version(
+  img : @block.Image,
+  vol : Volume,
+  mft : Mft,
+) -> VolumeVersion raise NtfsError {
+  let attrs = load_attributes(img, vol, mft, 3L)
+  match find_attribute(attrs, ATTR_VOLUME_INFORMATION) {
+    Some(attr) =>
+      if attr.non_resident {
+        parse_volume_information(read_attribute_data(img, vol, attr, "$Volume"))
+      } else {
+        parse_volume_information(attr.value)
+      }
+    None => raise Corrupt(reason="MFT record 3 has no $VOLUME_INFORMATION")
+  }
+}

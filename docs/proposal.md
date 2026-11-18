@@ -3,7 +3,7 @@
 moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析镜像字节，不挂载、不依赖 C 库、不要 root。一期交付 NTFS 3.1 的完整读取（含 LZNT1 压缩、稀疏段、跨记录属性），二期 ext4。
 
 - **参赛者**：王文挺｜联系方式见报名问卷（公开仓库不放手机号）
-- **仓库**：GitHub <https://github.com/wwt1733/moonfs>｜GitLink <https://gitlink.org.cn/wwt1733/moonfs>（同步镜像，29 个提交，全部实质开发）
+- **仓库**：GitHub <https://github.com/wwt1733/moonfs>｜GitLink <https://gitlink.org.cn/wwt1733/moonfs>（同步镜像，30+ 个提交，全部实质开发、无拆分凑数）
 - **方向**：存储基础设施 / 文件系统解析｜**性质**：原创实现，依据公开规范编写，非移植（见末节）
 - **本版针对 11/18 复审意见**：非驻留的 `$ATTRIBUTE_LIST` 已实现（含 `$MFT` 自身拆段），并补 `deep.bin` 与 `synth-mft-split.img` 两处代表性案例
 
@@ -11,7 +11,7 @@ moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析�
 
 能读 NTFS 的实现几乎都是 C：Linux 侧 `ntfs-3g`（GPL）与内核驱动，Windows 侧 `libfsntfs`。它们要么要求挂载（root / 管理员），要么必须链接原生 ABI——**结果是 WebAssembly 里读不了一块磁盘镜像**。不是没人想做，是这些实现的形态决定了它们进不了 wasm。
 
-MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库——moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑，这不是把 C 库翻译一遍。查重：mooncakes.io 全部 3794 个包中 `ntfs` / `ext4` 相关实现为 **0**；FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT，改为经统一卷接口对接它。
+MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库——moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑，这不是把 C 库翻译一遍。查重：在 mooncakes.io 检索 `ntfs` / `ext4` 均为 **0** 命中；FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT，改为经统一卷接口对接它。
 
 ## 二、通用性：三层可插拔
 
@@ -33,7 +33,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 四、一期交付范围
 
-**NTFS 3.1**：Windows XP 起的默认版本，覆盖当前在用的全部 Windows。版本号读自 `$VOLUME_INFORMATION`；读到 3.0 / 1.2 卷时结构层仍可解析，但 `$Secure` 等后加元文件的语义不做承诺。
+**NTFS 3.1**：Windows XP 起的默认版本，覆盖当前在用的全部 Windows。版本号读自 `$VOLUME_INFORMATION`，`moonfs info` 直接打印（真实 Windows 卷显示 3.1）；读到 3.0 / 1.2 卷时结构层仍可解析，但 `$Secure` 等后加元文件的语义不做承诺。
 
 "解析文件系统"没有终点就没有验收标准，一期分三层收口：
 
@@ -60,7 +60,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | `split.bin` | `$DATA` 两段，分放两条 MFT 记录与不相邻簇 | 2000 / 2048 B | **2000 字节**，按 VCN 拼好 |
 | `deep.bin` | 同上，且 `$ATTRIBUTE_LIST` 自己也搬到簇上（非常驻） | 2000 / 2048 B | **2000 字节**，列表先从簇上读出再合并 |
 
-`ls /` 列出全部六个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；三个后端输出与退出码一致。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
+`ls /` 列出全部六个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；三个后端跑同一套断言，js 与 wasm-gc 的 CLI 输出在 CI 里逐行 diff。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
 
 ### 代表性案例：列表自己也要从簇上读
 
@@ -95,11 +95,11 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | --- | --- | --- |
 | 字节 | 每次读前校验 `[offset, offset+n)` 落在缓冲区内 | 截断镜像被解析成"看起来合法"的残缺结构 |
 | 定位 | `clusters_per_mft_record` 是**有符号**字节，负值表示 `2^-n`；GPT 先验 CRC 再用偏移 | 后面读 MFT 全部跑偏；CRC 不过的头部字段可指向镜像任意位置 |
-| 结构 | USA 先修复；runlist 的 LCN 是**有符号增量**；目录索引项的文件引用是自己而非 `$FILE_NAME` 的父目录；压缩单元有"压完更大所以原样存储"与"整单元未分配"两个分支 | 跨扇区字段全错；簇号变天文数字；目录漏条目；把原文当 LZNT1 解并输出垃圾 |
+| 结构 | USA 先修复；runlist 的 LCN 是**有符号增量**；目录索引项的文件引用是自己而非 `$FILE_NAME` 的父目录；压缩单元有三个分支（LZNT1 解压、"压完更大所以原样存储"、"整单元未分配读作零"） | 跨扇区字段全错；簇号变天文数字；目录漏条目；把原文当 LZNT1 解并输出垃圾 |
 
 **验证**：LZNT1 用固定向量单测（未压缩块、短语回溯、重叠复制、多块拼接、越界报错），其中一条取自真实 Windows 卷；合成镜像由脚本生成、评审可重跑；端到端断言在三个后端各跑一遍；CI 三道防呆——零测试即失败、CLI 出错返回非零、e2e 步骤必须真正比对内容。
 
 ## 七、当前进度与原创性
 
-- 仓库已建，GitHub 与 GitLink 同步；`moon test` **66 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 下实测。
+- 仓库已建，GitHub 与 GitLink 同步；`moon test` **67 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 与 js 下实测、输出逐行一致。
 - **原创性**：依据 `[MS-FSCC]` / `[MS-DOS]` / `[MS-XCA]`（LZNT1）与 linux-ntfs 公开文档编写，未复制任何现有实现；模块划分上参考了 Rust `ntfs` crate（MIT）与 `ext4-view` 的思路。非移植项目，许可证 Apache-2.0。

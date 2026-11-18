@@ -509,3 +509,40 @@ test "合成镜像：非常驻的 $ATTRIBUTE_LIST 也能合并出完整文件" {
     }
   }
 }
+
+///|
+/// 版本号必须真的从 `$VOLUME_INFORMATION` 读出来。
+///
+/// 申报书里写了"版本号读自 `$VOLUME_INFORMATION`"，那就得有一条断言把它
+/// 钉住——否则这句话只是注释。合成镜像的 3.1 是生成器写进去的，真实
+/// Windows 卷的 3.1 是 Windows 自己写的，两边一致才算数。
+test "合成镜像：版本号读自 $VOLUME_INFORMATION" {
+  let img = match load_image() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let vol = match open_volume(img) {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let version = @ntfs.read_volume_version(img, vol, mft) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(version.major, 3)
+  assert_eq(version.minor, 1)
+}

@@ -55,6 +55,7 @@ ATTR_ATTRIBUTE_LIST = 0x20
 ATTR_FILE_NAME = 0x30
 ATTR_DATA = 0x80
 ATTR_INDEX_ROOT = 0x90
+ATTR_VOLUME_INFORMATION = 0x70
 
 FILE_ATTRIBUTE_ARCHIVE = 0x20
 FILE_ATTRIBUTE_DIRECTORY = 0x10000000
@@ -350,6 +351,20 @@ def build_image():
                 highest_vcn=MFT_CLUSTERS - 1,
                 attr_id=3,
             ),
+        ],
+    )
+
+    # Record 3: $Volume. It has to exist for the "version is read from
+    # $VOLUME_INFORMATION" claim to be checkable rather than decorative.
+    volume_info = bytearray(12)
+    volume_info[0x08] = 3
+    volume_info[0x09] = 1
+    records[3] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(0x06),
+            resident(ATTR_VOLUME_INFORMATION, bytes(volume_info), attr_id=2),
         ],
     )
 

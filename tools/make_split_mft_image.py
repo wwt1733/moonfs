@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_test_image import (  # noqa: E402
     ATTR_ATTRIBUTE_LIST,
     ATTR_DATA,
+    ATTR_VOLUME_INFORMATION,
     CLUSTER,
     FILE_ATTRIBUTE_ARCHIVE,
     FILE_ATTRIBUTE_DIRECTORY,
@@ -145,6 +146,20 @@ def build():
             ),
         ],
         base_record=0,
+    )
+
+    # Record 3: $Volume. It has to exist for the "version is read from
+    # $VOLUME_INFORMATION" claim to be checkable rather than decorative.
+    volume_info = bytearray(12)
+    volume_info[0x08] = 3
+    volume_info[0x09] = 1
+    records[3] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(0x06),
+            resident(ATTR_VOLUME_INFORMATION, bytes(volume_info), attr_id=2),
+        ],
     )
 
     records[ROOT_RECORD] = build_record(

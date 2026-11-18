@@ -94,6 +94,15 @@ test "Windows 卷：卷头与根目录" {
   if entries.length() < 15 {
     assert_true(false)
   }
+  // 版本号由 Windows 自己写进 $VOLUME_INFORMATION，不是我们合成的
+  let version = @ntfs.read_volume_version(img, vol, mft) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(version.major, 3)
+  assert_eq(version.minor, 1)
 }
 
 ///|
