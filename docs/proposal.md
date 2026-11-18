@@ -5,7 +5,7 @@ moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析�
 - **参赛者**：王文挺｜联系方式见报名问卷（公开仓库不放手机号）
 - **仓库**：GitHub <https://github.com/wwt1733/moonfs>｜GitLink <https://gitlink.org.cn/wwt1733/moonfs>（同步镜像，29 个提交，全部实质开发）
 - **方向**：存储基础设施 / 文件系统解析｜**性质**：原创实现，依据公开规范编写，非移植（见末节）
-- **本版针对 11/18 复审意见**：非驻留的 `$ATTRIBUTE_LIST` 已实现（含 `$MFT` 自身拆段），并补两块专用镜像作为代表性案例
+- **本版针对 11/18 复审意见**：非驻留的 `$ATTRIBUTE_LIST` 已实现（含 `$MFT` 自身拆段），并补 `deep.bin` 与 `synth-mft-split.img` 两处代表性案例
 
 ## 一、为什么在 MoonBit 里做
 
