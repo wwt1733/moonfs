@@ -2,8 +2,11 @@
 /// `$ATTRIBUTE_LIST` 的一项。
 ///
 /// 属性的全部内容装不进一条 MFT 记录时，NTFS 会把多出来的部分放进"扩展
-/// 记录"，并用 `$ATTRIBUTE_LIST` 串起来。列表本身是常驻属性，每项写明
-/// 类型、名字、该段起始 VCN、以及它落在哪条记录的第几号属性上。
+/// 记录"，并用 `$ATTRIBUTE_LIST` 串起来。每项写明类型、名字、该段起始
+/// VCN、以及它落在哪条记录的第几号属性上。
+///
+/// 列表自己也可能装不下记录而被搬到簇上（非常驻）。这层没有"先有鸡还是
+/// 先有蛋"的问题：列表的 runlist 就在主记录里，按普通数据属性读即可。
 pub(all) struct AttrListEntry {
   type_code : Int64
   name : String
@@ -155,11 +158,15 @@ pub fn load_attributes(
     Some(attr) => attr
     None => return base
   }
-  if list.non_resident {
-    // 列表本身长到装不下时也会被搬到簇上，一期没实现这一层
-    raise Unsupported(feature=label + " has a non-resident $ATTRIBUTE_LIST")
+  // 列表本身也可能是非常驻的：属性项多到一条记录装不下时，NTFS 把列表
+  // 搬到簇上，runlist 留在主记录里。既然 runlist 在手，就当普通数据读，
+  // 不需要先打开 MFT——所以这里不存在循环依赖。
+  let list_value = if list.non_resident {
+    read_attribute_data(img, vol, list, label + " $ATTRIBUTE_LIST")
+  } else {
+    list.value
   }
-  let entries = parse_attribute_list(list.value)
+  let entries = parse_attribute_list(list_value)
   let collected : Array[Attribute] = []
   for attr in base {
     collected.push(attr)

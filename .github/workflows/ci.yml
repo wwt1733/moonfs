@@ -59,10 +59,16 @@ jobs:
           grep -q "compressed.txt" ls.txt
           grep -q "compressed" ls.txt
           grep -q "sparse" ls.txt
+          grep -q "deep.bin" ls.txt
           run_cli export testdata/synth-ntfs.img /compressed.txt out-comp.bin
           run_cli export testdata/synth-ntfs.img /big.bin out-big.bin
           run_cli export testdata/synth-ntfs.img /sparse.bin out-sparse.bin
           run_cli export testdata/synth-ntfs.img /split.bin out-split.bin
+          run_cli export testdata/synth-ntfs.img /deep.bin out-deep.bin
+          # $MFT 自己拆成两段、列表也非常驻的卷：根目录在第二段里
+          run_cli ls testdata/synth-mft-split.img / | tee ls-split.txt
+          grep -q "after.bin" ls-split.txt
+          run_cli export testdata/synth-mft-split.img /after.bin out-after.bin
           python3 - <<'PY'
           comp = open("out-comp.bin", "rb").read()
           assert len(comp) == 1024, f"compressed length {len(comp)}"
@@ -75,5 +81,10 @@ jobs:
           split = open("out-split.bin", "rb").read()
           assert len(split) == 2000, f"split.bin length {len(split)}"
           assert split == bytes((i * 7 + 3) & 0xFF for i in range(2000)), "split.bin differs: $ATTRIBUTE_LIST extents were not merged"
-          print("compressed, non-resident and sparse payloads verified")
+          deep = open("out-deep.bin", "rb").read()
+          assert len(deep) == 2000, f"deep.bin length {len(deep)}"
+          assert deep == bytes((i * 13 + 5) & 0xFF for i in range(2000)), "deep.bin differs: the non-resident $ATTRIBUTE_LIST was not followed"
+          after = open("out-after.bin", "rb").read()
+          assert after == b"read from the second MFT run\n", "the second $MFT run was not joined"
+          print("compressed, non-resident, sparse and split-MFT payloads verified")
           PY

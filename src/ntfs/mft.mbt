@@ -120,40 +120,45 @@ pub fn Mft::open(img : @block.Image, vol : Volume) -> Mft raise NtfsError {
     runs,
   }
   // $MFT 自己的 $DATA 也可能被拆段：卷够大时一条记录装不下整个 runlist，
-  // 后面的段被放进扩展记录，由 $ATTRIBUTE_LIST 指出。
+  // 后面的段被放进扩展记录，由 $ATTRIBUTE_LIST 指出。列表本身同样可能
+  // 非常驻——它的 runlist 在记录 0 里，按普通数据读即可，不必先有 MFT。
   //
   // 这里存在先有鸡还是先有蛋：要读扩展记录，必须先有 MFT 的 runlist。
   // 解法是用已解析出的段去读，逐段接上——扩展记录本身位于 MFT 已覆盖的
   // 区域里，所以能读到。真读不到就停在已有部分：后续读高位记录会明确
   // 报 "runlist does not cover"，而不是返回错位的内容。
   match find_attribute(attrs, ATTR_ATTRIBUTE_LIST) {
-    Some(list) =>
-      if !list.non_resident {
-        let entries = parse_attribute_list(list.value) catch { _ => [] }
-        for entry in entries {
-          if entry.type_code != ATTR_DATA || entry.lowest_vcn == 0L {
-            continue
-          }
-          let ext_raw = mft.read_record(img, entry.record) catch {
-            _ => continue
-          }
-          let ext_label = "MFT record " + entry.record.to_string()
-          let ext_fixed = apply_fixup(ext_raw, vol.bytes_per_sector, ext_label) catch {
-            _ => continue
-          }
-          let ext_header = parse_record(ext_fixed)
-          let ext_attrs = parse_attributes(ext_fixed, ext_header.used_size) catch {
-            _ => continue
-          }
-          for attr in ext_attrs {
-            if attr.type_code == ATTR_DATA && attr.id == entry.id {
-              for run in attr.runs {
-                runs.push(run)
-              }
+    Some(list) => {
+      let list_value = if list.non_resident {
+        read_attribute_data(img, vol, list, "MFT $ATTRIBUTE_LIST") catch {
+          _ => Default::default()
+        }
+      } else {
+        list.value
+      }
+      let entries = parse_attribute_list(list_value) catch { _ => [] }
+      for entry in entries {
+        if entry.type_code != ATTR_DATA || entry.lowest_vcn == 0L {
+          continue
+        }
+        let ext_raw = mft.read_record(img, entry.record) catch { _ => continue }
+        let ext_label = "MFT record " + entry.record.to_string()
+        let ext_fixed = apply_fixup(ext_raw, vol.bytes_per_sector, ext_label) catch {
+          _ => continue
+        }
+        let ext_header = parse_record(ext_fixed)
+        let ext_attrs = parse_attributes(ext_fixed, ext_header.used_size) catch {
+          _ => continue
+        }
+        for attr in ext_attrs {
+          if attr.type_code == ATTR_DATA && attr.id == entry.id {
+            for run in attr.runs {
+              runs.push(run)
             }
           }
         }
       }
+    }
     None => ()
   }
   mft

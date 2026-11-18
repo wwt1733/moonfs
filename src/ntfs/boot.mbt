@@ -9,12 +9,6 @@ pub suberror NtfsError {
   Corrupt(reason~ : String)
   /// 底层镜像读取失败。
   Io(reason~ : String)
-  /// 遇到了实现范围之外的格式特性。
-  ///
-  /// 与 `Corrupt` 的区别：`Corrupt` 表示"这块镜像坏了"，`Unsupported`
-  /// 表示"镜像没坏，但这个特性本期不处理"。分开是为了让调用方能区分
-  /// 该重试、该报错，还是该换工具。
-  Unsupported(feature~ : String)
   /// 内容被 EFS 加密。
   ///
   /// 解密需要用户的证书与私钥，离线镜像解析器拿不到，因此这是物理上
@@ -210,7 +204,6 @@ pub fn describe_error(err : NtfsError) -> String {
     BadGeometry(reason~) => "bad geometry: " + reason
     Corrupt(reason~) => "corrupt: " + reason
     Io(reason~) => "io: " + reason
-    Unsupported(feature~) => "unsupported: " + feature
     Encrypted(path~) => "encrypted: " + path
   }
 }

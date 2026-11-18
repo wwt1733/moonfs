@@ -13,11 +13,15 @@ Layout (cluster = 512 bytes, MFT record = 1024 bytes):
     LCN 35       compressed.txt payload (LZNT1, occupies 1 cluster)
     LCN 36..37   split.bin first extent   (record 10)
     LCN 38..39   split.bin second extent  (record 11, not adjacent on purpose)
+    LCN 40       deep.bin $ATTRIBUTE_LIST (the list itself is non-resident)
+    LCN 41..42   deep.bin first extent    (record 12)
+    LCN 43..44   deep.bin second extent   (record 13)
 
-The volume carries five files on purpose, one per data path the parser has
+The volume carries six files on purpose, one per data path the parser has
 to handle: resident, non-resident multi-cluster, LZNT1 compressed, sparse
-(allocated nowhere, reads as zero), and $DATA split across two MFT records
-and joined by a resident $ATTRIBUTE_LIST.
+(allocated nowhere, reads as zero), $DATA split across two MFT records
+with a *resident* list, and the same split with the list itself moved onto
+the volume (non-resident $ATTRIBUTE_LIST).
 """
 
 import struct
@@ -38,7 +42,11 @@ DATA_COMPRESSED_LCN = 35
 # split.bin 的两段刻意放在不相邻的位置，合并顺序错了会立刻读出错位内容
 DATA_SPLIT_A_LCN = 36
 DATA_SPLIT_B_LCN = 38
-TOTAL_CLUSTERS = 40
+# deep.bin：$ATTRIBUTE_LIST 自己也非常驻，列表内容存在 LCN 40 上
+DATA_DEEP_LIST_LCN = 40
+DATA_DEEP_A_LCN = 41
+DATA_DEEP_B_LCN = 43
+TOTAL_CLUSTERS = 45
 
 FILETIME = 133_000_000_000_000_000  # a fixed timestamp, so fixtures are stable
 
@@ -351,6 +359,7 @@ def build_image():
     entries = [
         index_entry(7, "big.bin", FILE_ATTRIBUTE_ARCHIVE, 1000),
         index_entry(8, "compressed.txt", FILE_ATTRIBUTE_ARCHIVE, 1024),
+        index_entry(12, "deep.bin", FILE_ATTRIBUTE_ARCHIVE, 2000),
         index_entry(6, "hello.txt", FILE_ATTRIBUTE_ARCHIVE, 14),
         index_entry(9, "sparse.bin", FILE_ATTRIBUTE_ARCHIVE, 512),
         index_entry(10, "split.bin", FILE_ATTRIBUTE_ARCHIVE, 2000),
@@ -481,6 +490,64 @@ def build_image():
         base_record=10,
     )
 
+    # Records 12 / 13: the same split, but now the list itself does not fit in
+    # a record either, so it is moved onto the volume and becomes a
+    # non-resident attribute with its own runlist. This is what a file with
+    # many attributes (or many named streams) actually looks like.
+    #
+    # Reading the list needs no MFT: its runlist sits in the base record, so
+    # it is fetched exactly like file data. Getting this wrong means the
+    # extension record is never found and deep.bin reads back as 1024 bytes
+    # with no error at all.
+    deep_list = attribute_list(
+        [
+            (ATTR_DATA, 0, 12, 1),
+            (ATTR_DATA, 2, 13, 2),
+            (ATTR_ATTRIBUTE_LIST, 0, 12, 3),
+        ]
+    )
+    records[12] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(FILE_ATTRIBUTE_ARCHIVE),
+            file_name(5, "deep.bin", FILE_ATTRIBUTE_ARCHIVE, 2000),
+            non_resident(
+                ATTR_ATTRIBUTE_LIST,
+                bytes([0x11, 1, DATA_DEEP_LIST_LCN, 0x00]),
+                len(deep_list),
+                CLUSTER,
+                highest_vcn=0,
+                attr_id=3,
+            ),
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, 2, DATA_DEEP_A_LCN, 0x00]),
+                2000,
+                2 * CLUSTER,
+                lowest_vcn=0,
+                highest_vcn=1,
+                attr_id=1,
+            ),
+        ],
+    )
+    records[13] = build_record(
+        1,
+        0x0001,
+        [
+            non_resident(
+                ATTR_DATA,
+                bytes([0x11, 2, DATA_DEEP_B_LCN, 0x00]),
+                2000,
+                2 * CLUSTER,
+                lowest_vcn=2,
+                highest_vcn=3,
+                attr_id=2,
+            ),
+        ],
+        base_record=12,
+    )
+
     mft_offset = MFT_LCN * CLUSTER
     for number, payload in records.items():
         at = mft_offset + number * RECORD
@@ -503,6 +570,16 @@ def build_image():
     image[at_a : at_a + 1024] = split[:1024]
     at_b = DATA_SPLIT_B_LCN * CLUSTER
     image[at_b : at_b + 1024] = split[1024:]
+
+    # deep.bin: the non-resident list on its own cluster, the two extents in
+    # two more pairs of clusters
+    list_at = DATA_DEEP_LIST_LCN * CLUSTER
+    image[list_at : list_at + len(deep_list)] = deep_list
+    deep = bytes(((i * 13 + 5) & 0xFF) for i in range(2000))
+    deep_a = DATA_DEEP_A_LCN * CLUSTER
+    image[deep_a : deep_a + 1024] = deep[:1024]
+    deep_b = DATA_DEEP_B_LCN * CLUSTER
+    image[deep_b : deep_b + 1024] = deep[1024:]
 
     return bytes(image), big, compressed
 

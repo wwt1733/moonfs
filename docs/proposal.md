@@ -5,15 +5,13 @@ moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析�
 - **参赛者**：王文挺｜联系方式见报名问卷（公开仓库不放手机号）
 - **仓库**：GitHub <https://github.com/wwt1733/moonfs>｜GitLink <https://gitlink.org.cn/wwt1733/moonfs>（同步镜像，29 个提交，全部实质开发）
 - **方向**：存储基础设施 / 文件系统解析｜**性质**：原创实现，依据公开规范编写，非移植（见末节）
-- **本版针对上一轮审核**：压缩与稀疏读取已纳入一期并完成实现，目标格式版本与三层读取终点已写明
+- **本版针对 11/18 复审意见**：非驻留的 `$ATTRIBUTE_LIST` 已实现（含 `$MFT` 自身拆段），并补两块专用镜像作为代表性案例
 
 ## 一、为什么在 MoonBit 里做
 
 能读 NTFS 的实现几乎都是 C：Linux 侧 `ntfs-3g`（GPL）与内核驱动，Windows 侧 `libfsntfs`。它们要么要求挂载（root / 管理员），要么必须链接原生 ABI——**结果是 WebAssembly 里读不了一块磁盘镜像**。不是没人想做，是这些实现的形态决定了它们进不了 wasm。
 
-MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库。moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑。这不是把 C 库翻译一遍，是只有纯 MoonBit 才成立的能力。
-
-查重：mooncakes.io 全部 3794 个包中 `ntfs` / `ext4` 相关实现为 **0**。FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT，改为经统一卷接口对接它。
+MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C 库——moonfs 补的正是这个位置：同一份源码在 native / js / wasm-gc 三个后端跑，这不是把 C 库翻译一遍。查重：mooncakes.io 全部 3794 个包中 `ntfs` / `ext4` 相关实现为 **0**；FAT 家族已有 `chenliyi-cly/moonfat`，本项目不做 FAT，改为经统一卷接口对接它。
 
 ## 二、通用性：三层可插拔
 
@@ -42,16 +40,16 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | 层 | 终点 | 判据 |
 | --- | --- | --- |
 | 元数据 | 镜像字节 → 完整目录树 | 每条给出路径、逻辑大小、占用大小、时间戳、压缩/稀疏标志、MFT 记录号 |
-| 内容 | 任意文件 → 正确字节流 | 常驻、非常驻单段 / 多段、稀疏、LZNT1、尾部不足一压缩单元六种情形，逐字节等于原文件 |
+| 内容 | 任意文件 → 正确字节流 | 常驻、多段、稀疏、LZNT1、尾部不足一压缩单元、跨记录合并六种情形，逐字节等于原文件 |
 | 导出 | CLI 落盘 | `ls` 出目录树、`cat` 出内容、`export` 还原文件 |
 
-**做**：MBR / GPT 定位；卷头几何；MFT 与 USA 修复；属性链与 `$ATTRIBUTE_LIST` 跨记录合并；runlist（有符号增量与稀疏段）；`$I30` B+ 树目录（区分 Win32 / DOS 命名空间）；常驻 / 多段 / 稀疏 / LZNT1 四种数据路径；CLI `info` `partitions` `ls` `cat` `export`。
+**做**：MBR / GPT 定位；卷头几何；MFT 与 USA 修复；属性链与 `$ATTRIBUTE_LIST` 跨记录合并（列表自身常驻或非常驻均可）；runlist（有符号增量与稀疏段）；`$I30` B+ 树目录（区分 Win32 / DOS 命名空间）；常驻 / 多段 / 稀疏 / LZNT1 四种数据路径；CLI `info` `partitions` `ls` `cat` `export`。
 
-**不做**：写入与日志重放；删除文件找回；EFS 解密（要用户证书私钥，离线解析拿不到，遇即报错且不吐密文）；非常驻的 `$ATTRIBUTE_LIST`（列表长到装不下簇的情形，常驻形式已支持）；ext4（二期）；挂载与内核集成。
+**不做**：写入与日志重放；删除文件找回；EFS 解密（要用户证书私钥，离线解析拿不到，遇即报错且不吐密文）；ext4（二期）；挂载与内核集成。
 
 ## 五、含压缩文件镜像的预期行为
 
-`testdata/synth-ntfs.img`（20 KiB，NTFS 3.1，根目录五个文件，`tools/make_test_image.py` 可重跑）：
+`testdata/synth-ntfs.img`（22 KiB，NTFS 3.1，根目录六个文件，`tools/make_test_image.py` 可重跑）：
 
 | 文件 | 特征 | 逻辑 / 占用 | `moonfs cat` 预期 |
 | --- | --- | --- | --- |
@@ -60,8 +58,22 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | `compressed.txt` | LZNT1，压缩单元 2 簇 | 1024 / 512 B | **解压后 1024 字节**，与压缩前逐字节一致 |
 | `sparse.bin` | runlist 只有未分配段 | 512 / 0 B | 512 个零字节 |
 | `split.bin` | `$DATA` 两段，分放两条 MFT 记录与不相邻簇 | 2000 / 2048 B | **2000 字节**，按 VCN 拼好 |
+| `deep.bin` | 同上，且 `$ATTRIBUTE_LIST` 自己也搬到簇上（非常驻） | 2000 / 2048 B | **2000 字节**，列表先从簇上读出再合并 |
 
-`ls /` 列出全部五个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；EFS 文件返回 `Encrypted(path=...)`、退出码非零、不输出密文；三个后端输出与退出码一致。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
+`ls /` 列出全部六个条目，压缩文件标 `compressed` 并同时给逻辑大小与占用大小；EFS 文件返回 `Encrypted(path=...)`、退出码非零、不输出密文；三个后端输出与退出码一致。这张表已进 CI：每次 push 都在 wasm-gc 下真正执行 `export` 并逐字节比对。
+
+### 代表性案例：列表自己也要从簇上读
+
+属性多到一条记录装不下时，NTFS 把多出来的部分放进扩展记录，用 `$ATTRIBUTE_LIST` 串起来；属性再多，列表本身也装不下记录，于是被搬到簇上。这里有个循环：读扩展记录要先有 MFT 的 runlist，而 runlist 由住在 MFT 里的属性描述。解法是——列表带着自己的 runlist，按普通数据属性读即可，不需要先打开 MFT。
+
+两块专用镜像各钉住一半：
+
+| 镜像 | 制造的结构 | 预期 | 处理错的后果 |
+| --- | --- | --- | --- |
+| `synth-ntfs.img` | `deep.bin`：两段 `$DATA` 分放记录 12 / 13，列表非常驻于 LCN 40 | `cat` 得 2000 字节 | 只并第一段，**静默少读一半** |
+| `synth-mft-split.img` | `$MFT` 的 `$DATA` 拆两段（LCN 10..17 / 20..27），列表非常驻；根目录记录 5 与文件记录 6 都在第二段 | `ls /` 得 `after.bin`，`cat` 得 29 字节 | 只剩第一段，**根目录都读不出** |
+
+两条断言都在 CI 里跑；把修复回退后它们会分别报 “MFT runs = 1” 和 “2 != 4”，不是靠肉眼确认。
 
 ### 真实 Windows 卷
 

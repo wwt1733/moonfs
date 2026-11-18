@@ -36,7 +36,7 @@ fn entry_named(
 }
 
 ///|
-test "合成镜像：根目录五个条目，大小与生成器一致" {
+test "合成镜像：根目录六个条目，大小与生成器一致" {
   let img = match load_image() {
     Some(v) => v
     None => {
@@ -64,10 +64,11 @@ test "合成镜像：根目录五个条目，大小与生成器一致" {
       return
     }
   }
-  assert_eq(entries.length(), 5)
+  assert_eq(entries.length(), 6)
   let expected = [
     ("big.bin", 1000L),
     ("compressed.txt", 1024L),
+    ("deep.bin", 2000L),
     ("hello.txt", 14L),
     ("sparse.bin", 512L),
     ("split.bin", 2000L),
@@ -417,6 +418,92 @@ test "合成镜像：跨记录的 $DATA 段被合并" {
   for i in 0..<2000 {
     if data.at(i).to_int() != ((i * 7 + 3) & 0xFF) {
       println("split.bin differs at " + i.to_string())
+      assert_true(false)
+      return
+    }
+  }
+}
+
+///|
+/// `$ATTRIBUTE_LIST` 自己也非常驻时，仍要合并出完整文件。
+///
+/// 列表装不进一条记录时会被搬到簇上，runlist 留在主记录里。读它不需要
+/// 先打开 MFT——所以这里没有循环依赖。漏掉这一层的话扩展记录永远找不到，
+/// deep.bin 会安静地少读一半，而不是报错。
+test "合成镜像：非常驻的 $ATTRIBUTE_LIST 也能合并出完整文件" {
+  let img = match load_image() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let vol = match open_volume(img) {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entry = match entry_named(entries, "deep.bin") {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+
+  // 先钉住 fixture 的形状：列表本身必须是非常驻的，否则这条测试什么也没验证
+  let attrs = @ntfs.load_attributes(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let list = match @ntfs.find_attribute(attrs, 0x20L) {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_true(list.non_resident)
+  let data_attr = match @ntfs.find_named_attribute(attrs, 0x80L, "") {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  // 两段各 2 簇，合并后 runlist 必须是 4 个簇
+  assert_eq(@ntfs.allocated_clusters(@ntfs.runlist_of(data_attr)), 4L)
+
+  let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  if data.length() != 2000 {
+    println("deep.bin length " + data.length().to_string())
+    assert_true(false)
+    return
+  }
+  for i in 0..<2000 {
+    if data.at(i).to_int() != ((i * 13 + 5) & 0xFF) {
+      println("deep.bin differs at " + i.to_string())
       assert_true(false)
       return
     }
