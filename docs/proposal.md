@@ -33,7 +33,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 四、一期交付范围
 
-**NTFS 3.1**：Windows XP 起的默认版本，覆盖当前在用的全部 Windows。版本号读自 `$VOLUME_INFORMATION`，`moonfs info` 直接打印（真实 Windows 卷显示 3.1）；读到 3.0 / 1.2 卷时结构层仍可解析，但 `$Secure` 等后加元文件的语义不做承诺。
+**NTFS 3.1**：Windows XP 起的默认版本，覆盖当前在用的全部 Windows。版本号读自 `$VOLUME_INFORMATION`，`moonfs info` 直接打印（真实 Windows 卷显示 3.1）。读到 3.0 / 1.2 卷时不拒绝打开，但本期只在 3.1 卷上做过端到端验证，`$Secure` 等后加元文件的语义不做承诺。
 
 "解析文件系统"没有终点就没有验收标准，一期分三层收口：
 
