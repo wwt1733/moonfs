@@ -99,5 +99,5 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 七、当前进度与原创性
 
-- 仓库已建，GitHub 与 GitLink 同步；`moon test` **63 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 下实测。
+- 仓库已建，GitHub 与 GitLink 同步；`moon test` **65 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成，CLI 五个子命令在 wasm-gc 下实测。
 - **原创性**：依据 `[MS-FSCC]` / `[MS-DOS]` / `[MS-XCA]`（LZNT1）与 linux-ntfs 公开文档编写，未复制任何现有实现；模块划分上参考了 Rust `ntfs` crate（MIT）与 `ext4-view` 的思路。非移植项目，许可证 Apache-2.0。
