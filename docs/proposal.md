@@ -79,7 +79,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ### 真实 Windows 卷
 
-只用自己写的合成镜像自证不算数——编码器与解码器可能共享同一个误解。所以另有一块 Windows 自己格式化的卷：`diskpart` 建固定 VHD → `format fs=ntfs` → `compact /c` 压缩，再截掉 VHD 尾部 footer（`testdata/win-ntfs.img`，24 MB，git 压缩后 182 KB，已入库）：
+只用自己写的合成镜像自证不算数——编码器与解码器可能共享同一个误解。所以另有一块 Windows 自己格式化的卷：`diskpart` 建固定 VHD → `format fs=ntfs` → `compact /c` 压缩，再截掉 VHD 尾部 footer（`testdata/win-ntfs.img`，24 MB，git 压缩后不到 200 KB，已入库）：
 
 | 文件 | 写入内容 | 占用（`compact` / 本项目） | 导出 SHA-256 |
 | --- | --- | --- | --- |
