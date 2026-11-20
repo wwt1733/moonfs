@@ -78,6 +78,19 @@ jobs:
           run_cli ls testdata/synth-mft-split.img / | tee ls-split.txt
           grep -q "after.bin" ls-split.txt
           run_cli export testdata/synth-mft-split.img /after.bin out-after.bin
+          # 命名数据流：默认流之外的字节必须能单独列、单独读
+          run_cli streams testdata/synth-ntfs.img /hello.txt | tee streams.txt
+          grep -q "meta" streams.txt
+          run_cli cat testdata/synth-ntfs.img /hello.txt:meta > ads.txt
+          grep -q "ads:meta" ads.txt
+          # 重解析点：读链接本身要报错并给出目标，不能当作空文件返回
+          grep -q "reparse:symlink" ls-split.txt
+          if run_cli cat testdata/synth-mft-split.img /link.txt > link.txt 2>&1; then
+            echo "reading a reparse point must fail" >&2
+            exit 1
+          fi
+          grep -q "reparse point" link.txt
+          grep -q "notepad.exe" link.txt
           # EFS 文件：必须是明确的错误 + 非零退出码，不能把密文当内容吐出来
           if run_cli cat testdata/synth-mft-split.img /secret.bin > secret.txt 2>&1; then
             echo "reading an EFS file must fail" >&2

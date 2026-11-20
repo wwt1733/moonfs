@@ -124,3 +124,71 @@ test "EFS 文件报错而不是返回密文" {
   }
   assert_eq(message, "encrypted: MFT record 7")
 }
+
+///|
+/// 重解析点：能读出链接本身，但不跟随目标。
+///
+/// `link.txt` 指向 `\??\C:\Windows\notepad.exe`——那个文件不在这块镜像里。
+/// 跟随它等于凭空造出一条镜像中并不存在的路径，所以语义是：报出 tag 与
+/// 目标，拒绝继续。返回 0 字节是不行的，那会让调用方以为"文件是空的"。
+test "重解析点：报出目标，不跟随镜像外路径" {
+  let img = match split_image() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let vol = @ntfs.Volume::open(img, 0L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entry = match entry_named(entries, "link.txt") {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let rp = @ntfs.reparse_of(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  match rp {
+    Some(point) => {
+      assert_eq(point.kind, "symlink")
+      assert_eq(point.print_name, "\\??\\C:\\Windows\\notepad.exe")
+    }
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let mut message = ""
+  let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
+    err => {
+      message = @ntfs.describe_error(err)
+      Default::default()
+    }
+  }
+  assert_eq(data.length(), 0)
+  assert_eq(
+    message, "reparse point (symlink): \\??\\C:\\Windows\\notepad.exe -- not followed",
+  )
+}

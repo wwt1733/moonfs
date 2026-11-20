@@ -549,3 +549,85 @@ test "合成镜像：版本号读自 $VOLUME_INFORMATION" {
   assert_eq(version.major, 3)
   assert_eq(version.minor, 1)
 }
+
+///|
+/// 命名数据流：默认流之外还有 `hello.txt:meta`。
+///
+/// 只看未命名 `$DATA` 的读法会返回 14 字节、一切正常——这正是危险之处：
+/// 流里的字节被静默丢掉，没有任何信号。所以既要能列出，也要能单独读，
+/// 而且默认流的结果不能变。
+test "合成镜像：命名数据流可列出、可单独读出" {
+  let img = match load_image() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let vol = match open_volume(img) {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let mft = @ntfs.Mft::open(img, vol) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entries = @ntfs.list_directory(img, vol, mft, 5L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let entry = match entry_named(entries, "hello.txt") {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let streams = @ntfs.list_streams(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  if streams.length() != 1 {
+    println("stream count " + streams.length().to_string())
+    assert_true(false)
+    return
+  }
+  assert_eq(streams[0].name, "meta")
+  assert_eq(streams[0].size, 9L)
+
+  let ads = @ntfs.read_named_stream(img, vol, mft, entry.record_number, "meta") catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(@utf8.decode_lossy(ads), "ads:meta\n")
+
+  // 默认流不受影响
+  let data = @ntfs.read_file(img, vol, mft, entry.record_number) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(@utf8.decode_lossy(data), "hello, moonfs\n")
+
+  // 不存在的流要明确报 NotFound，而不是返回空字节冒充"空流"
+  let mut missing = ""
+  let _ = @ntfs.read_named_stream(img, vol, mft, entry.record_number, "nope") catch {
+    err => {
+      missing = @ntfs.describe_error(err)
+      Default::default()
+    }
+  }
+  assert_eq(missing, "not found: nope")
+}

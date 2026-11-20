@@ -9,6 +9,15 @@ pub suberror NtfsError {
   Corrupt(reason~ : String)
   /// 底层镜像读取失败。
   Io(reason~ : String)
+  /// 命名数据流或属性不存在。
+  ///
+  /// 与 `Corrupt` 分开：文件没坏，只是没有这个流。
+  NotFound(name~ : String)
+  /// 读到了重解析点。
+  ///
+  /// 链接本身能读，目标不能：目标可能在镜像之外，跟过去等于凭空造出
+  /// 一条镜像里并不存在的路径。要的是把 tag 与目标原样交回调用方。
+  Reparse(kind~ : String, target~ : String)
   /// 内容被 EFS 加密。
   ///
   /// 解密需要用户的证书与私钥，离线镜像解析器拿不到，因此这是物理上
@@ -204,6 +213,9 @@ pub fn describe_error(err : NtfsError) -> String {
     BadGeometry(reason~) => "bad geometry: " + reason
     Corrupt(reason~) => "corrupt: " + reason
     Io(reason~) => "io: " + reason
+    NotFound(name~) => "not found: " + name
+    Reparse(kind~, target~) =>
+      "reparse point (" + kind + "): " + target + " -- not followed"
     Encrypted(path~) => "encrypted: " + path
   }
 }

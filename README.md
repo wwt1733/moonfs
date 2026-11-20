@@ -63,6 +63,8 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | **NTFS 压缩（LZNT1）解压** | **是** | 不适用 |
 | EFS / fscrypt 加密内容 | 明确返回 `Encrypted` 错误（CI 断言不吐密文） | 同 |
 | `$ATTRIBUTE_LIST` 跨记录属性 | **是**（常驻 / 非常驻列表都合并到主记录） | 不适用 |
+| 命名数据流（ADS） | **是**（列出并单独读出） | 不适用 |
+| 重解析点（符号链接 / 联接） | **是**（报 tag 与目标，不跟随） | 不适用 |
 | 卷版本 `$VOLUME_INFORMATION` | **是**（`info` 打印，3.1） | 二期 |
 
 ## 目标格式版本
@@ -88,6 +90,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 - **只读。** 不写镜像、不改文件系统、不做日志重放（`$LogFile` / ext4 journal）。
 - **不做数据恢复与删除文件找回。** 那是另一个问题域。
 - **不做 EFS 解密。** 需要用户的证书与私钥，任何离线镜像解析器都拿不到，因此这是物理上不可行，而非实现偷懒。遇到加密属性返回 `Encrypted` 并带上路径，不返回密文冒充内容。
+- **不跟随重解析点。** 符号链接与目录联接的目标可能是 `\??\C:\Windows` 这种镜像之外的路径，跟过去等于凭空造出一条镜像里并不存在的路径。能读到的是链接本身：tag、substitute name、print name，原样交回调用方，由它决定要不要解释。
 - **不做 ext4 htree 哈希目录的查找语义。** 二期实现时目录项走线性扫描，慢但正确。
 - **不做挂载、不做内核集成、不做写回缓存。**
 
@@ -115,7 +118,8 @@ let data = @ntfs.read_file(img, vol, mft, entries[0].record_number)
 moonfs info <image>                 卷几何、NTFS 版本与分区数
 moonfs partitions <image>           分区表条目
 moonfs ls <image> [path]            列目录
-moonfs cat <image> <path>           输出文件内容
+moonfs cat <image> <path>[:stream]  输出默认流或命名数据流
+moonfs streams <image> <path>       列出命名数据流（ADS）
 moonfs export <image> <path> <out>  把文件解出到本地
 ```
 
@@ -158,6 +162,7 @@ moon test --target wasm-gc
 - **镜像可重放。** `testdata/synth-ntfs.img` 由 `tools/make_test_image.py` 生成，22 KiB 的 NTFS 3.1 裸卷，根目录下六个文件，覆盖常驻、非常驻多段、LZNT1 压缩、稀疏、跨记录合并（列表常驻）、跨记录合并（列表非常驻）六条数据路径。评审可以重跑脚本并比对字节，不必相信一个来路不明的二进制。
 - **跨记录属性的样本。** `split.bin` 的 `$DATA` 被拆成两段、分放在两条 MFT 记录和两个不相邻的簇上，靠常驻的 `$ATTRIBUTE_LIST` 串起来；`deep.bin` 更进一步，列表自己也搬到簇上，成为非常驻属性。只读主记录不会报错——会给出一半内容，所以两条都断言 2000 字节全对。
 - **MFT 自身被拆段。** `testdata/synth-mft-split.img` 由 `tools/make_split_mft_image.py` 生成：`$MFT` 的 `$DATA` 分成 LCN 10..17 与 20..27 两段，列表非常驻，根目录记录 5 与文件记录 6 都在第二段里。要读它们必须先解开「读扩展记录要 MFT、MFT 布局又在 MFT 里」这个循环——列表带着自己的 runlist，按普通数据读即可。回退修复后这条测试会报 `MFT runs = 1`。同一镜像里还有一个 `secret.bin`（EFS 加密标志）：读取必须抛 `Encrypted` 并带上路径，测试断言返回零字节——把密文当内容返回会让调用方以为读成功了。
+- **命名数据流与重解析点。** `hello.txt` 上挂了一个 `:meta` 流：`streams` 要列出来、`cat /hello.txt:meta` 要读出 9 字节，而默认流仍是 14 字节——两件事都得对。`link.txt` 是指向 `\??\C:\Windows\notepad.exe` 的符号链接，那个文件不在镜像里：`ls` 标 `reparse:symlink`，`cat` 必须报错并给出目标，不能返回 0 字节冒充空文件。
 - **跨后端一致。** 同一套端到端断言（`tests/e2e`）在 native / JS / wasm-gc 三个后端各跑一遍。CI 还会在 wasm-gc 下真正执行 `export`，把解出的内容与生成器写入的值逐字节比对——如果压缩解压只在 native 正确，这一步会挂。
 - **CLI 输出跨后端逐行比对。** `ls` 与 `info` 在 wasm-gc 与 js 下各跑一次，`diff` 必须为空。这条不是形式主义：js 的 `process.argv` 会把解释器与脚本路径带进来，早先的 `main` 假定子命令固定在 `argv[1]`，在 js 上第一条命令就报 `unknown command`，而 wasm-gc 一切正常——不比对就发现不了。
 - **版本号来自磁盘，不是常量。** `$VOLUME_INFORMATION` 读出来的 3.1 在合成镜像与真实 Windows 卷上都要成立；后者是 Windows 自己写的值。

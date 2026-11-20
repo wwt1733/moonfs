@@ -56,6 +56,7 @@ ATTR_FILE_NAME = 0x30
 ATTR_DATA = 0x80
 ATTR_INDEX_ROOT = 0x90
 ATTR_VOLUME_INFORMATION = 0x70
+ATTR_REPARSE_POINT = 0xC0
 
 FILE_ATTRIBUTE_ARCHIVE = 0x20
 FILE_ATTRIBUTE_DIRECTORY = 0x10000000
@@ -389,7 +390,10 @@ def build_image():
         ],
     )
 
-    # Record 6: resident data.
+    # Record 6: resident data, plus a named data stream (ADS).
+    # `dir /r` on Windows shows it as `hello.txt:meta:$DATA`. The default
+    # stream stays 14 bytes; a reader that only looks at the unnamed $DATA
+    # returns the same 14 bytes and never mentions that the stream exists.
     records[6] = build_record(
         1,
         0x0001,
@@ -397,6 +401,7 @@ def build_image():
             standard_information(FILE_ATTRIBUTE_ARCHIVE),
             file_name(5, "hello.txt", FILE_ATTRIBUTE_ARCHIVE, 14),
             resident(ATTR_DATA, b"hello, moonfs\n", attr_id=2),
+            resident(ATTR_DATA, b"ads:meta\n", attr_id=3, name="meta"),
         ],
     )
 

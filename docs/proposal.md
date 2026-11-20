@@ -1,6 +1,6 @@
 # moonfs —— 纯 MoonBit 的只读文件系统镜像解析库
 
-moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析镜像字节，不挂载、不依赖 C 库、不要 root。一期交付 NTFS 3.1 的完整读取（含 LZNT1 压缩、稀疏段、跨记录属性），二期 ext4。
+moonfs 是一个纯 MoonBit 的只读文件系统镜像解析库：直接解析镜像字节，不挂载、不依赖 C 库、不要 root。读取范围是 NTFS 3.1 的常规数据与元数据——未命名与命名 `$DATA` 都读出字节，稀疏、LZNT1、跨记录合并都在范围内；重解析点与 EFS 只给语义，不跟随、不解密。二期 ext4。
 
 - **参赛者**：王文挺｜联系方式见报名问卷（公开仓库不放手机号）
 - **仓库**：GitHub <https://github.com/wwt1733/moonfs>｜GitLink <https://gitlink.org.cn/wwt1733/moonfs>（同步镜像，30+ 个提交，全部实质开发、无拆分凑数）
@@ -40,12 +40,23 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 | 层 | 终点 | 判据 |
 | --- | --- | --- |
 | 元数据 | 镜像字节 → 完整目录树 | 每条给出名字、MFT 记录号与序列号、逻辑 / 占用大小、三个时间戳、压缩 / 稀疏标志；路径由名字逐级拼出 |
-| 内容 | 任意文件 → 正确字节流 | 常驻、多段、稀疏、LZNT1、尾部不足一压缩单元、跨记录合并六种情形，逐字节等于原文件 |
-| 导出 | CLI 落盘 | `ls` 出目录树、`cat` 出内容、`export` 还原文件 |
+| 内容 | 未命名 / 命名 `$DATA` → 正确字节流 | 常驻、多段、稀疏、LZNT1、尾部不足一压缩单元、跨记录合并六种情形逐字节等于原文件；重解析点与 EFS 走报错路径，不返回可疑字节 |
+| 导出 | CLI 落盘 | `ls` 出目录树、`cat` 出内容（含 `path:stream`）、`streams` 列命名流、`export` 还原文件 |
 
-**做**：MBR / GPT 定位；卷头几何；MFT 与 USA 修复；属性链与 `$ATTRIBUTE_LIST` 跨记录合并（列表自身常驻或非常驻均可）；runlist（有符号增量与稀疏段）；`$I30` B+ 树目录（区分 Win32 / DOS 命名空间）；常驻 / 多段 / 稀疏 / LZNT1 四种数据路径；CLI `info` `partitions` `ls` `cat` `export`。
+结构决定语义，下面这张表是这一期对"读不出来"的完整交代——每一行的行为都有 fixture 与 CI 断言：
 
-**不做**：写入与日志重放；删除文件找回；EFS 解密（要用户证书私钥，离线解析拿不到，遇即报错且不吐密文）；ext4（二期）；挂载与内核集成。
+| 结构 | 我们做什么 | 代表性输入 → 输出 |
+| --- | --- | --- |
+| 未命名 `$DATA` | 读出完整字节流 | `cat /big.bin` → 1000 字节 |
+| 命名数据流（ADS） | 列出并单独读出，不混进默认流 | `hello.txt` 的 `:meta` → `streams` 显示 `meta 9 B`；`cat /hello.txt:meta` → `ads:meta` |
+| 重解析点（符号链接 / 目录联接） | 解析 tag 与目标字符串，**不跟随** | `link.txt` → `\??\C:\Windows\notepad.exe`；`cat` 报 `reparse point (symlink): … -- not followed`，退出码非零 |
+| 目标在镜像内还是镜像外 | 一律不跟随，只交回路径字符串 | 同上：链接本身读得出，目标不在（或不在镜像里）也不猜 |
+| EFS 加密内容 | 不读，报错且不吐密文 | `secret.bin` → `encrypted: MFT record 7` |
+| 目录 | 列条目，不返回字节 | API 给出名字、记录号与序列号、大小、三个时间戳、标志；`ls` 打印名字、大小与标志 |
+
+**做**：MBR / GPT 定位；卷头几何；MFT 与 USA 修复；属性链与 `$ATTRIBUTE_LIST` 跨记录合并（列表自身常驻或非常驻均可）；runlist（有符号增量与稀疏段）；`$I30` B+ 树目录（区分 Win32 / DOS 命名空间）；常驻 / 多段 / 稀疏 / LZNT1 四种数据路径；命名数据流（ADS）的枚举与读取；`$REPARSE_POINT` 的 tag 与目标解析；CLI `info` `partitions` `ls` `cat` `streams` `export`。
+
+**不做**：写入与日志重放；删除文件找回；EFS 解密（要用户证书私钥，离线解析拿不到）；跟随重解析点的目标（目标可能在镜像之外，跟过去等于凭空造路径）；ext4（二期）；挂载与内核集成。
 
 ## 五、含压缩文件镜像的预期行为
 
@@ -53,7 +64,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 | 文件 | 特征 | 逻辑 / 占用 | `moonfs cat` 预期 |
 | --- | --- | --- | --- |
-| `hello.txt` | 常驻未压缩 | 14 / 14 B | 14 字节原文 |
+| `hello.txt` | 常驻未压缩，另有命名流 `:meta` | 14 / 14 B（流 9 B） | 默认流 14 字节；`/hello.txt:meta` 另读 |
 | `big.bin` | 非常驻跨 2 簇 | 1000 / 1024 B | 1000 字节，跨簇拼接正确 |
 | `compressed.txt` | LZNT1，压缩单元 2 簇 | 1024 / 512 B | **解压后 1024 字节**，与压缩前逐字节一致 |
 | `sparse.bin` | runlist 只有未分配段 | 512 / 0 B | 512 个零字节 |
@@ -75,7 +86,7 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 两条断言都在 CI 里跑；把修复回退后它们会分别报 “MFT runs = 1” 和 “2 != 4”，不是靠肉眼确认。
 
-唯一读不出来的是 EFS：`synth-mft-split.img` 里的 `secret.bin` 带加密标志，`cat` 返回 `encrypted: MFT record 7`、退出码非零，CI 还断言输出里不含明文。这不是范围取舍——解密要用户证书与私钥，离线解析拿不到，任何工具都读不出；能选的只是失败方式：明确报错，还是把密文当内容返回。
+有两类结构不返回字节，语义都写在第四节那张表里：EFS（缺证书私钥，物理不可行）与重解析点（目标可能在镜像之外，跟过去等于凭空造路径）。两者都必须明确报错：`secret.bin` → `encrypted: MFT record 7`，`link.txt` → `reparse point (symlink): \??\C:\Windows\notepad.exe -- not followed`，退出码均非零。返回 0 字节是不行的——那会让调用方以为文件是空的。
 
 ### 真实 Windows 卷
 
@@ -101,5 +112,5 @@ MoonBit 的 `preferred_target` 可以是 wasm，而 wasm 里没有可绑的 C �
 
 ## 七、当前进度与原创性
 
-- 仓库已建，GitHub 与 GitLink 同步；`moon test` **67 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成；CLI 五个子命令在 wasm-gc 与 js 下实测，`ls` / `info` 的完整输出在 CI 里逐行 diff。
+- 仓库已建，GitHub 与 GitLink 同步；`moon test` **67 个用例在 native / js / wasm-gc 三后端全绿**；上述模块全部完成；CLI 六个子命令在 wasm-gc 与 js 下实测，`ls` / `info` 的完整输出在 CI 里逐行 diff。
 - **原创性**：依据 `[MS-FSCC]` / `[MS-DOS]` / `[MS-XCA]`（LZNT1）与 linux-ntfs 公开文档编写，未复制任何现有实现；模块划分上参考了 Rust `ntfs` crate（MIT）与 `ext4-view` 的思路。非移植项目，许可证 Apache-2.0。

@@ -112,6 +112,78 @@ pub fn read_file(
   let attrs = load_attributes(img, vol, mft, number)
   match find_named_attribute(attrs, ATTR_DATA, "") {
     Some(attr) => read_attribute_data(img, vol, attr, label)
-    None => Default::default()
+    // 没有默认数据流时，可能是目录，也可能是重解析点。后者不能当成空
+    // 文件返回：调用方会以为"文件就是空的"，而实际它是个指向别处的链接。
+    None =>
+      match find_attribute(attrs, ATTR_REPARSE_POINT) {
+        Some(rp_attr) => {
+          let value = read_attribute_data(img, vol, rp_attr, label)
+          let rp = parse_reparse_point(value)
+          raise Reparse(kind=rp.kind, target=rp.print_name)
+        }
+        None => Default::default()
+      }
+  }
+}
+
+///|
+/// 一个命名数据流（ADS）的概要。
+///
+/// Windows 上 `echo hi > a.txt:hidden` 就是在 `a.txt` 上建了一个叫
+/// `hidden` 的流。它和默认流平级，都是 `$DATA` 属性，只是带名字——
+/// 所以"读文件"如果只取默认流，就会漏掉这些字节，而且不报错。
+pub(all) struct StreamInfo {
+  name : String
+  size : Int64
+  allocated : Int64
+  compressed : Bool
+  encrypted : Bool
+  sparse : Bool
+}
+
+///|
+/// 列出一个文件的命名数据流。默认流（名字为空）不在其中。
+pub fn list_streams(
+  img : @block.Image,
+  vol : Volume,
+  mft : Mft,
+  number : Int64,
+) -> Array[StreamInfo] raise NtfsError {
+  let attrs = load_attributes(img, vol, mft, number)
+  let out : Array[StreamInfo] = []
+  for attr in attrs {
+    if attr.type_code == ATTR_DATA && attr.name != "" {
+      let allocated = if attr.non_resident {
+        allocated_clusters(runlist_of(attr)) * vol.cluster_size.to_int64()
+      } else {
+        attr.allocated_size
+      }
+      out.push({
+        name: attr.name,
+        size: attr.data_size,
+        allocated,
+        compressed: attr.is_compressed(),
+        encrypted: attr.is_encrypted(),
+        sparse: attr.is_sparse(),
+      })
+    }
+  }
+  out
+}
+
+///|
+/// 读取一个命名数据流的内容。
+pub fn read_named_stream(
+  img : @block.Image,
+  vol : Volume,
+  mft : Mft,
+  number : Int64,
+  name : String,
+) -> Bytes raise NtfsError {
+  let label = "MFT record " + number.to_string() + " stream " + name
+  let attrs = load_attributes(img, vol, mft, number)
+  match find_named_attribute(attrs, ATTR_DATA, name) {
+    Some(attr) => read_attribute_data(img, vol, attr, label)
+    None => raise NotFound(name~)
   }
 }

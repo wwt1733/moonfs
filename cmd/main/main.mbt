@@ -13,7 +13,10 @@ fn usage() -> Unit {
   )
   println("  moonfs partitions <image>           partition table entries")
   println("  moonfs ls <image> [path]            list a directory (default /)")
-  println("  moonfs cat <image> <path>           print a file's contents")
+  println(
+    "  moonfs cat <image> <path>[:stream]   print the default or a named stream",
+  )
+  println("  moonfs streams <image> <path>       list named data streams (ADS)")
   println("  moonfs export <image> <path> <out>  extract a file to disk")
 }
 
@@ -192,7 +195,7 @@ fn cmd_info(path : String) -> Unit {
 ///|
 fn is_command(name : String) -> Bool {
   match name {
-    "info" | "partitions" | "ls" | "cat" | "export" => true
+    "info" | "partitions" | "ls" | "cat" | "export" | "streams" => true
     _ => false
   }
 }
@@ -224,6 +227,10 @@ fn main {
     "ls" => {
       let sub = if args.length() > start + 2 { args[start + 2] } else { "/" }
       cmd_ls(path, sub)
+    }
+    "streams" => {
+      let sub = if args.length() > start + 2 { args[start + 2] } else { "/" }
+      cmd_streams(path, sub)
     }
     "cat" =>
       if args.length() > start + 2 {
@@ -345,6 +352,12 @@ fn describe_entry(
   if info.encrypted {
     marks = marks + " encrypted"
   }
+  let reparse = @ntfs.reparse_of(img, vol, mft, entry.record_number) catch {
+    _ => None
+  }
+  if reparse is Some(rp) {
+    marks = marks + " reparse:" + rp.kind
+  }
   pad_right(entry.name, 28) +
   pad_right(info.logical_size.to_string() + " B", 14) +
   marks
@@ -410,6 +423,58 @@ fn cmd_cat(image_path : String, sub_path : String) -> Unit {
           return
         }
       }
+      // `path:stream` 表示读命名数据流；冒号后没有内容就是默认流
+      let pieces : Array[String] = []
+      for piece in sub_path.split(":") {
+        pieces.push(piece.to_owned())
+      }
+      let file_part = if pieces.length() > 0 { pieces[0] } else { "" }
+      let stream = if pieces.length() > 1 { pieces[1] } else { "" }
+      let number = match resolve_path(img, vol, mft, file_part) {
+        Ok(n) => n
+        Err(message) => {
+          fail(message)
+          return
+        }
+      }
+      let data = if stream == "" {
+        @ntfs.read_file(img, vol, mft, number) catch {
+          err => {
+            fail(ntfs_error_text(err))
+            return
+          }
+        }
+      } else {
+        @ntfs.read_named_stream(img, vol, mft, number, stream) catch {
+          err => {
+            fail(ntfs_error_text(err))
+            return
+          }
+        }
+      }
+      println(@utf8.decode_lossy(data))
+    }
+  }
+}
+
+///|
+fn cmd_streams(image_path : String, sub_path : String) -> Unit {
+  match read_image(image_path) {
+    Err(message) => fail(message)
+    Ok(img) => {
+      let vol = match open_volume(img) {
+        Ok(v) => v
+        Err(message) => {
+          fail(message)
+          return
+        }
+      }
+      let mft = @ntfs.Mft::open(img, vol) catch {
+        err => {
+          fail(ntfs_error_text(err))
+          return
+        }
+      }
       let number = match resolve_path(img, vol, mft, sub_path) {
         Ok(n) => n
         Err(message) => {
@@ -417,13 +482,33 @@ fn cmd_cat(image_path : String, sub_path : String) -> Unit {
           return
         }
       }
-      let data = @ntfs.read_file(img, vol, mft, number) catch {
+      let streams = @ntfs.list_streams(img, vol, mft, number) catch {
         err => {
           fail(ntfs_error_text(err))
           return
         }
       }
-      println(@utf8.decode_lossy(data))
+      if streams.length() == 0 {
+        println("no named data streams")
+        return
+      }
+      for stream in streams {
+        let mut marks = ""
+        if stream.compressed {
+          marks = marks + " compressed"
+        }
+        if stream.sparse {
+          marks = marks + " sparse"
+        }
+        if stream.encrypted {
+          marks = marks + " encrypted"
+        }
+        println(
+          pad_right(stream.name, 28) +
+          pad_right(stream.size.to_string() + " B", 14) +
+          marks,
+        )
+      }
     }
   }
 }

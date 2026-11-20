@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_test_image import (  # noqa: E402
     ATTR_ATTRIBUTE_LIST,
     ATTR_DATA,
+    ATTR_REPARSE_POINT,
     ATTR_VOLUME_INFORMATION,
     CLUSTER,
     FILE_ATTRIBUTE_ARCHIVE,
@@ -71,6 +72,12 @@ FILE_RECORD = 6
 SECRET_RECORD = 7
 MFT_EXT_RECORD = 1
 SECRET_BODY = b"EFS ciphertext!!"
+LINK_RECORD = 4
+LINK_NAME = "link.txt"
+# 故意指向镜像之外：链接本身能读，目标不在这块镜像里，跟随就等于凭空
+# 造出一条镜像里并不存在的路径。
+LINK_TARGET = r"\??\C:\Windows\notepad.exe"
+LINK_STATUS = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def boot():
@@ -87,6 +94,29 @@ def boot():
     out[0x48:0x50] = u64(0x4D4F4F4E46530002)
     out[510:512] = b"\x55\xaa"
     return bytes(out)
+
+
+def reparse_symlink(substitute, print_name):
+    """Build a $REPARSE_POINT value for a symbolic link.
+
+    Layout: 8-byte generic header, then four length fields and a flags word,
+    then the path buffer. Both offsets are relative to the path buffer, not
+    to the attribute -- getting that wrong shifts every character.
+    """
+    sub = substitute.encode("utf-16-le")
+    prn = print_name.encode("utf-16-le")
+    body = bytearray(0x0C + len(sub) + len(prn))
+    body[0x00:0x02] = u16(0)
+    body[0x02:0x04] = u16(len(sub))
+    body[0x04:0x06] = u16(len(sub))
+    body[0x06:0x08] = u16(len(prn))
+    body[0x08:0x0C] = u32(0)
+    body[0x0C:] = sub + prn
+    out = bytearray(8)
+    out[0x00:0x04] = u32(0xA000000C)
+    out[0x04:0x06] = u16(len(body))
+    out[0x06:0x08] = u16(0)
+    return bytes(out + body)
 
 
 def build():
@@ -173,6 +203,7 @@ def build():
                     index_entry(
                         FILE_RECORD, FILE_NAME, FILE_ATTRIBUTE_ARCHIVE, len(FILE_BODY)
                     ),
+                    index_entry(LINK_RECORD, LINK_NAME, LINK_STATUS, 0),
                     index_entry(
                         SECRET_RECORD,
                         "secret.bin",
@@ -190,6 +221,21 @@ def build():
             standard_information(FILE_ATTRIBUTE_ARCHIVE),
             file_name(ROOT_RECORD, FILE_NAME, FILE_ATTRIBUTE_ARCHIVE, len(FILE_BODY)),
             resident(ATTR_DATA, FILE_BODY, attr_id=2),
+        ],
+    )
+
+    # Record 4: a symbolic link whose target lives outside this image.
+    records[LINK_RECORD] = build_record(
+        1,
+        0x0001,
+        [
+            standard_information(LINK_STATUS),
+            file_name(ROOT_RECORD, LINK_NAME, LINK_STATUS, 0),
+            resident(
+                ATTR_REPARSE_POINT,
+                reparse_symlink(LINK_TARGET, LINK_TARGET),
+                attr_id=2,
+            ),
         ],
     )
 
