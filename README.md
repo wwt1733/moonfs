@@ -4,12 +4,20 @@
 
 在浏览器里直接打开一块磁盘镜像，列出目录、读出文件——不需要挂载、不需要 root、不需要一个 C 库。
 
+用包：
+
+```
+moon add wwt1733/moonfs
+```
+
+从源码跑（含测试与两块测试镜像，能重放 `testdata/` 里的镜像）：
+
 ```
 git clone https://github.com/wwt1733/moonfs
 cd moonfs && moon test
 ```
 
-> 命名空间 `wwt1733` 对应 GitHub 账户，当前版本 0.2.0，**尚未发布到 mooncakes.io**，所以还不能用 `moon add` 拉取——发布后会改回那条命令。
+> 命名空间 `wwt1733` 对应 GitHub 账户，当前版本 0.2.0，已发布到 mooncakes.io。
 
 ## 为什么需要它
 
