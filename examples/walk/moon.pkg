@@ -1,0 +1,9 @@
+import {
+  "wwt1733/moonfs/src/block",
+  "wwt1733/moonfs/src/partition",
+  "wwt1733/moonfs/src/ntfs",
+  "moonbitlang/x/fs",
+  "moonbitlang/core/env",
+}
+
+pkgtype(kind: "executable")

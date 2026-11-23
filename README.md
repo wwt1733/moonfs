@@ -112,6 +112,22 @@ let entries = @ntfs.list_directory(img, vol, mft, 5L)
 let data = @ntfs.read_file(img, vol, mft, entries[0].record_number)
 ```
 
+上面是骨架。完整可运行版本在 `examples/walk`：递归走完整棵树，打印每个文件的标志、时间戳与命名流。
+
+```
+$ moon run examples/walk -- testdata/synth-ntfs.img
+/  (22 KiB, cluster 512 B)
+/big.bin  1000 B
+/compressed.txt  1024 B
+/deep.bin  2000 B
+/hello.txt  14 B
+    :meta  9 B
+/sparse.bin  512 B
+/split.bin  2000 B
+```
+
+这个示例在 CI 里每次 push 都跑，而且 wasm-gc 与 js 两后端的输出要逐行 `diff`——示例跑不起来或者后端输出不一致，CI 会红。
+
 命令行：
 
 ```

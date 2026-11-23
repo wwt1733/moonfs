@@ -120,3 +120,12 @@ jobs:
           assert after == b"read from the second MFT run\n", "the second $MFT run was not joined"
           print("compressed, non-resident, sparse and split-MFT payloads verified")
           PY
+          # 可运行示例：验收要求里的"至少一个可运行示例"，必须真能跑。
+          # 跑的是库 API（不经过 CLI 的路径解析），因此它同时验证了
+          # list_directory / list_streams / reparse_of 的公开用法。
+          timeout --signal=KILL 120 moon run examples/walk --target wasm-gc -- testdata/synth-ntfs.img | tee walk.txt
+          grep -q "/hello.txt  14 B" walk.txt
+          grep -q ":meta  9 B" walk.txt
+          grep -q "/deep.bin  2000 B" walk.txt
+          timeout --signal=KILL 120 moon run examples/walk --target js -- testdata/synth-ntfs.img > walk-js.txt
+          diff walk.txt walk-js.txt
