@@ -82,7 +82,7 @@ pub fn parse_dir_entries(
       let name_end = pos + 8 + name_len.to_int()
       if name_end <= pos + rec_len.to_int() {
         let name_bytes = @binio.slice(data, pos + 8, name_len.to_int()) catch {
-          _ => Bytes::new(0)
+          _ => b""
         }
         out.push({
           inode: inode_no,

@@ -10,7 +10,7 @@ pub fn read_inode_data(
 ) -> Bytes raise Ext4Error {
   check_readable_inode(inode)
   if inode.size == 0L {
-    return Bytes::new(0)
+    return b""
   }
   // 快符号链接：目标路径直接存在 i_block 的 60 字节里，不占数据块
   if inode.is_symlink() && !inode.uses_extents() {

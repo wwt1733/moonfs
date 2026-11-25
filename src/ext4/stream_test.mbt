@@ -29,7 +29,7 @@ fn ex_sb() -> @ext4.Superblock {
     feature_compat: 0x38L,
     feature_incompat: 0x2C2L,
     feature_ro_compat: 0x46BL,
-    uuid: Bytes::new(16),
+    uuid: Bytes::make(16, b'\x00'),
     volume_name: "",
     base_offset: 0L,
     groups_count: 1L,
