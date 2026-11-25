@@ -1,6 +1,6 @@
 # moonfs
 
-**Pure MoonBit, FFI-free read-only filesystem image parser. NTFS 3.1 ships today; ext4 is next.**
+**Pure MoonBit, FFI-free read-only filesystem image parser. NTFS 3.1 and ext4 both read today.**
 
 在浏览器里直接打开一块磁盘镜像，列出目录、读出文件——不需要挂载、不需要 root、不需要一个 C 库。
 
@@ -37,7 +37,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | --- | --- | --- | --- |
 | 字节层 | `@block` | 镜像当只读字节源，越界即报错 | 数据源换成文件 / 内存 / wasm 宿主内存 |
 | 定位层 | `@partition` | MBR / GPT → 卷起始偏移 | 裸卷传 0，分区内卷传 `start_lba` |
-| 结构层 | `@ntfs`（二期 `@ext4`） | 卷内结构 → 目录树与文件流 | 换文件系统只换这一层 |
+| 结构层 | `@ntfs` / `@ext4` | 卷内结构 → 目录树与文件流 | 换文件系统只换这一层 |
 
 两条路径都在 CI 里：`testdata/synth-ntfs.img` 是裸卷（引导扇区在偏移 0），`testdata/win-ntfs.img` 是分区内卷（MBR，起点 LBA 128），同一个 `Volume::open` 各跑一遍。
 
@@ -52,8 +52,8 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 | `src/block` | 已完成 | 镜像字节源、扇区对齐访问、越界保护 |
 | `src/partition` | 已完成 | MBR 分区表、GPT 头与分区项（含 CRC32 校验） |
 | `src/ntfs` | **已完成** | 卷头、MFT 记录与 USA 修复、属性链、`$ATTRIBUTE_LIST` 合并（含非常驻列表）、runlist、`$I30` 目录枚举、数据流、LZNT1 解压、稀疏段 |
-| `src/ext4` | 二期 | 一期只承诺 NTFS 可交付，ext4 不在一期范围内 |
-| `cmd/main` | 已完成 | CLI：`info` / `partitions` / `ls` / `cat` / `export` |
+| `src/ext4` | **只读核心已完成** | 超级块与 feature 白名单、块组描述符、inode、extent 树、目录、数据流 |
+| `cmd/main` | NTFS 已完成 | CLI：`info` / `partitions` / `ls` / `cat` / `streams` / `export`；ext4 目前只有库 API，没接 CLI |
 
 未完成的部分不会在文档里写成"已支持"。
 
@@ -61,25 +61,46 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 
 | 能力 | NTFS | ext4 |
 | --- | --- | --- |
-| 分区表定位（MBR / GPT） | 是 | 是 |
-| 卷头 / Boot Sector 解析 | 是 | 二期 |
-| MFT / inode 遍历 | 是 | 二期 |
-| 目录枚举 | 是 | 二期 |
-| 常驻数据读取 | 是 | 二期 |
-| 非常驻数据（多段 runlist） | 是 | 二期 |
-| **稀疏段读取** | **是**（读作零） | 二期 |
-| **NTFS 压缩（LZNT1）解压** | **是** | 不适用 |
-| EFS / fscrypt 加密内容 | 明确返回 `Encrypted` 错误（CI 断言不吐密文） | 同 |
-| `$ATTRIBUTE_LIST` 跨记录属性 | **是**（常驻 / 非常驻列表都合并到主记录） | 不适用 |
-| 命名数据流（ADS） | **是**（列出并单独读出） | 不适用 |
-| 重解析点（符号链接 / 联接） | **是**（报 tag 与目标，不跟随） | 不适用 |
-| 卷版本 `$VOLUME_INFORMATION` | **是**（`info` 打印，3.1） | 二期 |
+| 分区表定位（MBR / GPT） | 是 | 是（同一层，与文件系统无关） |
+| 卷头 / 超级块 | 是 | 是（`incompat` 白名单） |
+| MFT / inode 遍历 | 是 | 是（含 64 位块号） |
+| 目录枚举 | 是（`$I30` B+ 树） | 是（线性扫描，htree 目录同路径） |
+| 常驻数据 | 是 | 是（含内联在 `i_block` 的符号链接目标） |
+| 多段数据 | 是（runlist） | 是（extent 树，深度上限 5） |
+| 稀疏 / 洞 | 是（读作零） | 是（洞与未初始化段都读作零） |
+| 压缩 | LZNT1 解压 | 不适用（ext4 无内置压缩） |
+| 加密内容 | EFS 返回 `Encrypted`，不吐密文 | 加密 inode 拒绝读取 |
+| 命名数据流（ADS） | 是（列出并单独读出） | 不适用 |
+| 重解析点 / 符号链接 | 报 tag 与目标，不跟随 | 读出链接目标，但不跟随 |
+| 卷版本 | `$VOLUME_INFORMATION`（`info` 打印） | 不适用（按 feature 位判定） |
+
+## ext4 验证方式（可重放）
+
+`testdata/ext4.img` 由 `tools/make_ext4_image.sh` 生成——`mke2fs` 建卷、`debugfs` 写文件、`e2fsck -D` 把大目录转成 htree。全部由 e2fsprogs 完成，不是手写字节：自己写的编码器和自己的解码器共用同一个误解时，测试会互相印证。
+
+```
+wsl -e bash tools/make_ext4_image.sh    # 或任意 Linux + e2fsprogs
+```
+
+| 对象 | 形状 | 断言 |
+| --- | --- | --- |
+| `hello.txt` | 14 B 常驻 | 内容等于 `hello, moonfs\n` |
+| `big.bin` | 300000 B，逻辑块 30..40 被 punch | 4 段 extent，逐字节等于图案，洞读出零 |
+| `sparse.bin` | 100000 B、零个数据块 | 读出 100000 个零（extent 树为空） |
+| `unwritten.bin` | 40000 B、一段未初始化 extent | 读出全零；单元测试里那个块塞满 `0x5A`，照读就会露 |
+| `sub/nested.txt` | 子目录 | 逐级解析，100 B 内容正确 |
+| `link.txt` | 快符号链接 | 目标存 `i_block`，读出 `target-of-link` |
+| `many/` | 400 个文件，`e2fsck -D` 转成 htree | 402 个条目全列出，`f123` 可读 |
+
+超级块 12 个字段与 `dumpe2fs` 逐项相等；inode 号、extent 形状与 `debugfs` 的 `stat` / `blocks` 对齐。
+
+**不做**：ext2 风格的旧式块映射（无 extents）直接拒绝；htree 不做哈希查找，走线性扫描；journal 不重放，`needs_recovery` 只作为标志暴露。
 
 ## 目标格式版本
 
 **NTFS：目标是 3.1**（Windows XP 起的默认版本，覆盖当前所有在用的 Windows）。版本号读自 `$VOLUME_INFORMATION` 属性。读到 3.0 / 1.2 卷时结构层仍可解析，但 `$Secure` 等后加的元文件语义不做承诺。
 
-**ext4：按 feature flag 判定，而不是按内核版本。** ext4 磁盘格式是一组特性位的组合，二期实现时会读超级块的 `compat` / `ro_compat` / `incompat`，遇到未知的 `incompat` 位直接拒绝打开并报 `UnsupportedFeature`，而不是按最接近的布局去猜。
+**ext4：按 feature flag 判定，而不是按内核版本。** ext4 磁盘格式是一组特性位的组合，实现读超级块的 `compat` / `ro_compat` / `incompat`，`incompat` 走白名单——遇到不认识的位直接拒绝打开并报 `UnsupportedFeature`，而不是按最接近的布局去猜。代价是少数合法卷（`META_BG`、`INLINE_DATA` 等）会被拒；读出错误内容还不报错，比读不了严重。
 
 ## 一期读取终点
 
@@ -99,7 +120,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 - **不做数据恢复与删除文件找回。** 那是另一个问题域。
 - **不做 EFS 解密。** 需要用户的证书与私钥，任何离线镜像解析器都拿不到，因此这是物理上不可行，而非实现偷懒。遇到加密属性返回 `Encrypted` 并带上路径，不返回密文冒充内容。
 - **不跟随重解析点。** 符号链接与目录联接的目标可能是 `\??\C:\Windows` 这种镜像之外的路径，跟过去等于凭空造出一条镜像里并不存在的路径。能读到的是链接本身：tag、substitute name、print name，原样交回调用方，由它决定要不要解释。
-- **不做 ext4 htree 哈希目录的查找语义。** 二期实现时目录项走线性扫描，慢但正确。
+- **不做 ext4 htree 的哈希查找。** 条目按 `rec_len` 线性扫描，htree 目录也一样走这条路径（已在 fixture 上验证）；不实现按哈希定位，慢但正确。
 - **不做挂载、不做内核集成、不做写回缓存。**
 
 ## 使用

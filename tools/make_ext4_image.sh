@@ -45,11 +45,14 @@ debugfs -w -R "set_inode_field sparse.bin size 100000" "$out" >/dev/null 2>&1 \
   || echo "(设置 sparse.bin size 失败)"
 debugfs -w -R "symlink link.txt target-of-link" "$out" >/dev/null
 
-# 预分配但未写入的段：ee_len 的最高位置 1，读出来必须是零而不是磁盘上的旧数据
-yes 'unwritten-fixture-payload' | head -c 20000 > "$tmp/unwritten.bin"
-debugfs -w -R "write $tmp/unwritten.bin unwritten.bin" "$out" >/dev/null
-debugfs -w -R "fallocate unwritten.bin 0 4" "$out" >/dev/null 2>&1 \
-  || echo "(fallocate 不可用，unwritten.bin 会是普通数据)"
+# 预分配但未写入的段：ee_len 的最高位置 1，读出来必须是零。
+# 顺序很重要——先做出空洞，再 fallocate 才会分配未初始化块；对已经
+# 有数据的块再 fallocate 只是空操作（上一版就是这么白跑的）。
+debugfs -w -R "write /dev/null unwritten.bin" "$out" >/dev/null
+debugfs -w -R "set_inode_field unwritten.bin size 40000" "$out" >/dev/null 2>&1 \
+  || echo "(设置 unwritten.bin size 失败)"
+debugfs -w -R "fallocate unwritten.bin 0 9" "$out" >/dev/null 2>&1 \
+  || echo "(fallocate 不可用)"
 
 # 400 个条目把目录顶过 4 KiB，dir_index 会把它转成 htree
 printf 'x' > "$tmp/one.bin"
@@ -60,6 +63,11 @@ debugfs -w -f "$tmp/cmds" "$out" >/dev/null
 
 # 在第 30..40 块挖洞，逼出「一个文件多个 extent + 中间有洞」
 debugfs -w -R "punch big.bin 30 40" "$out" >/dev/null
+
+# -D 会重排目录：目录大到超过一块时，ext4 会把它转成 htree。
+# 这是拿到 htree 目录的正规办法，比手改 inode 标志安全。
+echo "== e2fsck -D 重排目录（触发 htree）=="
+e2fsck -fyD "$out" 2>&1 | tail -4 || true
 
 echo "== e2fsck 只读校验 =="
 e2fsck -fn "$out" 2>&1 | tail -5 || true
@@ -81,12 +89,16 @@ echo
 echo "== 特殊 inode 的 stat（大小与 extent 形状）=="
 for f in sparse.bin unwritten.bin many; do
   echo "-- $f"
-  debugfs -R "stat /$f" "$out" 2>&1 | egrep -i "Size|EXTENTS|Uninit|Flags" | head -8 || true
+  debugfs -R "stat /$f" "$out" 2>&1 | egrep -i "Size:|EXTENTS|Uninit|ETB|Flags:" | head -10 || true
 done
 
 echo
 echo "== many 目录前几条（400 个条目应把目录顶过 4 KiB）=="
 debugfs -R "ls /many" "$out" 2>&1 | grep -v "^debugfs " | head -5
+
+echo
+echo "== /many 是否转成 htree =="
+debugfs -R "htree_dump /many" "$out" 2>&1 | grep -v "^debugfs " | head -12 || echo "(不是 htree)"
 
 echo
 echo "== 各文件块映射（真值用于核对 extent）=="

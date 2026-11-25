@@ -281,36 +281,57 @@ test "ext4：文件内容与 sha256 一致" {
     assert_true(false)
   }
 
-  // 20000 字节普通文件：大小不是块大小的整数倍时不能截断
-  let plain = @ext4.resolve_path(img, sb, "/unwritten.bin") catch {
+  // 未初始化段：ee_len 的最高位是 1，磁盘上那 10 个块不该被当成内容。
+  // `debugfs dump` 的哈希 e7e2dcff… 等于 40000 个零；先钉住 extent 形状，
+  // 再钉住读出来的字节，两步都做才算验证——只看内容的话，块里若是零
+  // （新镜像常见），忽略标志也能"碰巧通过"。
+  let uninit = @ext4.resolve_path(img, sb, "/unwritten.bin") catch {
     _ => {
       assert_true(false)
       return
     }
   }
-  assert_eq(plain.size, 20000L)
-  let plain_data = @ext4.read_inode_data(img, sb, plain) catch {
+  assert_eq(uninit.size, 40000L)
+  let runs = @ext4.extent_runs(img, sb, uninit) catch {
     _ => {
       assert_true(false)
       return
     }
   }
-  assert_eq(plain_data.length(), 20000)
-  let plain_want = @utf8.encode("unwritten-fixture-payload\n")
-  for i in 0..<20000 {
-    if plain_data.at(i) != plain_want[i % plain_want.length()] {
-      println("unwritten.bin differs at " + i.to_string())
+  if runs.length() != 1 {
+    println("unwritten.bin has " + runs.length().to_string() + " runs")
+    assert_true(false)
+    return
+  }
+  assert_true(runs[0].uninitialized)
+  assert_eq(runs[0].length, 10L)
+  let uninit_data = @ext4.read_inode_data(img, sb, uninit) catch {
+    _ => {
       assert_true(false)
+      return
+    }
+  }
+  assert_eq(uninit_data.length(), 40000)
+  let mut nonzero = -1
+  for i in 0..<40000 {
+    if uninit_data.at(i) != b'\x00' {
+      nonzero = i
       break
     }
+  }
+  if nonzero >= 0 {
+    println("unwritten.bin returned data at " + nonzero.to_string())
+    assert_true(false)
   }
 }
 
 ///|
-/// 目录被顶过一块之后，条目散在两个数据块里，扫描必须能跨块继续。
+/// htree 目录：`e2fsck -D` 把超过一块的目录转成了索引目录。
 ///
-/// 这一块不是 htree —— inode 没有 `EXT2_INDEX_FL`，`debugfs` 逐条写入时
-/// 只是把目录延长了。所以它证明的是「多块线性目录」，别把结论说大。
+/// 这里不实现哈希查找，靠 `rec_len` 线性走完所有块。能走通的关键是
+/// dx_root 里 `..` 的 `rec_len` 覆盖了整块剩余空间——索引区在扫描器眼里
+/// 是一段"被并进上一条的空白"，不会被当成目录项读出来。如果不信这条，
+/// 会多出一堆不存在的文件名。
 test "ext4：跨块目录能列全" {
   let img = match load_ext4() {
     Some(v) => v
@@ -332,7 +353,9 @@ test "ext4：跨块目录能列全" {
     }
   }
   assert_true(many.is_directory())
-  assert_eq(many.size, 8192L)
+  assert_eq(many.size, 12288L)
+  // 0x1000 = EXT2_INDEX_FL：确认这真是 htree，而不是碰巧跨了两块
+  assert_true((many.flags & 0x1000L) != 0L)
   let entries = @ext4.list_directory(img, sb, many) catch {
     _ => {
       assert_true(false)
