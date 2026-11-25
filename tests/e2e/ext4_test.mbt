@@ -126,6 +126,8 @@ test "ext4：根目录条目与 inode 号" {
     ("sub", 14L),
     ("sparse.bin", 16L),
     ("link.txt", 17L),
+    ("unwritten.bin", 18L),
+    ("many", 19L),
   ]
   if entries.length() != expected.length() {
     println("entry count " + entries.length().to_string())
@@ -251,19 +253,116 @@ test "ext4：文件内容与 sha256 一致" {
   }
   assert_eq(@utf8.decode_lossy(target), "target-of-link")
 
-  // 空文件：size 0，不读任何块
-  let empty = @ext4.resolve_path(img, sb, "/sparse.bin") catch {
+  // 全空洞文件：有 100000 字节的大小，但 extent 树是空的。
+  // `debugfs dump` 出来的 sha256 是 9192c25b…，正是 100000 个零。
+  let sparse = @ext4.resolve_path(img, sb, "/sparse.bin") catch {
     _ => {
       assert_true(false)
       return
     }
   }
-  assert_eq(empty.size, 0L)
-  let empty_data = @ext4.read_inode_data(img, sb, empty) catch {
+  assert_eq(sparse.size, 100000L)
+  let sparse_data = @ext4.read_inode_data(img, sb, sparse) catch {
     _ => {
       assert_true(false)
       return
     }
   }
-  assert_eq(empty_data.length(), 0)
+  assert_eq(sparse_data.length(), 100000)
+  let mut nonzero = -1
+  for i in 0..<100000 {
+    if sparse_data.at(i) != b'\x00' {
+      nonzero = i
+      break
+    }
+  }
+  if nonzero >= 0 {
+    println("sparse.bin is not zero at " + nonzero.to_string())
+    assert_true(false)
+  }
+
+  // 20000 字节普通文件：大小不是块大小的整数倍时不能截断
+  let plain = @ext4.resolve_path(img, sb, "/unwritten.bin") catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(plain.size, 20000L)
+  let plain_data = @ext4.read_inode_data(img, sb, plain) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(plain_data.length(), 20000)
+  let plain_want = @utf8.encode("unwritten-fixture-payload\n")
+  for i in 0..<20000 {
+    if plain_data.at(i) != plain_want[i % plain_want.length()] {
+      println("unwritten.bin differs at " + i.to_string())
+      assert_true(false)
+      break
+    }
+  }
+}
+
+///|
+/// 目录被顶过一块之后，条目散在两个数据块里，扫描必须能跨块继续。
+///
+/// 这一块不是 htree —— inode 没有 `EXT2_INDEX_FL`，`debugfs` 逐条写入时
+/// 只是把目录延长了。所以它证明的是「多块线性目录」，别把结论说大。
+test "ext4：跨块目录能列全" {
+  let img = match load_ext4() {
+    Some(v) => v
+    None => {
+      assert_true(false)
+      return
+    }
+  }
+  let sb = @ext4.Superblock::open(img, 0L) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let many = @ext4.resolve_path(img, sb, "/many") catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_true(many.is_directory())
+  assert_eq(many.size, 8192L)
+  let entries = @ext4.list_directory(img, sb, many) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  // 400 个文件 + . + ..
+  if entries.length() != 402 {
+    println("many has " + entries.length().to_string() + " entries")
+    assert_true(false)
+    return
+  }
+  let mut seen = 0
+  for entry in entries {
+    if entry.name.length() == 4 && entry.name[0] == 'f' {
+      seen = seen + 1
+    }
+  }
+  assert_eq(seen, 400)
+  let leaf = @ext4.resolve_path(img, sb, "/many/f123") catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  let leaf_data = @ext4.read_inode_data(img, sb, leaf) catch {
+    _ => {
+      assert_true(false)
+      return
+    }
+  }
+  assert_eq(@utf8.decode_lossy(leaf_data), "x")
 }
