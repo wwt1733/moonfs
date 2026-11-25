@@ -1,5 +1,6 @@
 import {
   "wwt1733/moonfs/src/block",
+  "wwt1733/moonfs/src/ext4",
   "wwt1733/moonfs/src/ntfs",
   "wwt1733/moonfs/src/partition",
   "moonbitlang/x/fs",
