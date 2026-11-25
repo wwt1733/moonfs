@@ -17,7 +17,7 @@ git clone https://github.com/wwt1733/moonfs
 cd moonfs && moon test
 ```
 
-> 命名空间 `wwt1733` 对应 GitHub 账户，当前版本 0.2.0，已发布到 mooncakes.io。
+> 命名空间 `wwt1733` 对应 GitHub 账户，当前版本 0.3.0，已发布到 mooncakes.io。
 
 ## 为什么需要它
 
@@ -43,7 +43,7 @@ moonfs 用纯 MoonBit 实现镜像层与文件系统层的字节解析，不依�
 
 ## 当前进度
 
-这是 0.2.0 的状态，进度如实列出：
+这是 0.3.0 的状态，进度如实列出：
 
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
@@ -156,6 +156,19 @@ $ moon run examples/walk -- testdata/synth-ntfs.img
 ```
 
 这个示例在 CI 里每次 push 都跑，而且 wasm-gc 与 js 两后端的输出要逐行 `diff`——示例跑不起来或者后端输出不一致，CI 会红。
+
+ext4 走同一套字节层，入口换成超级块：
+
+```moonbit
+// 裸卷传 0；分区内卷传所在分区的起始 LBA
+let sb = @ext4.Superblock::open(img, 0L)
+
+// 按路径解析到 inode，再读内容
+let inode = @ext4.resolve_path(img, sb, "/sub/nested.txt")
+let body = @ext4.read_inode_data(img, sb, inode)
+```
+
+ext4 目前只到库 API，没有 CLI 子命令；能读什么、边界在哪，见上面的支持矩阵与「ext4 验证方式」。
 
 命令行：
 
