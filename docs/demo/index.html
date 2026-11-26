@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moonfs · 在浏览器里读磁盘镜像</title>
+<style>
+  :root {
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --muted: #6b6b66;
+    --line: #e4e4df;
+    --accent: #b3541e;
+    --accent-soft: #fbf0e9;
+    --code: #f6f6f3;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 18px 26px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+  header .tag { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a { color: var(--muted); font-size: 13px; text-decoration: none; border-bottom: 1px solid var(--line); }
+  header a:hover { color: var(--accent); border-color: var(--accent); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* 落地页 */
+  #landing {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+  }
+  #drop {
+    width: min(720px, 100%);
+    border: 1.5px dashed #d6d6cf;
+    border-radius: 14px;
+    background: var(--panel);
+    padding: 46px 40px;
+    text-align: center;
+    transition: border-color .15s, background .15s;
+  }
+  #drop.hot { border-color: var(--accent); background: var(--accent-soft); }
+  #drop h2 { margin: 0 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  #drop p { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  button:hover { border-color: #c9c9c1; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  button.primary:hover { background: #333; }
+  #drop .hint { margin-top: 20px; font-size: 12.5px; color: var(--muted); }
+
+  /* 工作区 */
+  #work { flex: 1; display: none; min-height: 0; }
+  #work.on { display: flex; }
+  aside {
+    width: 320px;
+    min-width: 240px;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .volbar {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .volbar select { font: inherit; font-size: 12.5px; max-width: 100%; flex: 1; }
+  #tree { overflow: auto; padding: 8px 6px 20px; flex: 1; font-size: 13.5px; }
+  .node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    font: inherit;
+    font-size: 13.5px;
+    color: inherit;
+    text-align: left;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .node:hover { background: #f4f4f0; }
+  .node:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .node.sel { background: var(--accent-soft); }
+  .node .caret { width: 12px; color: var(--muted); font-size: 10px; cursor: pointer; user-select: none; }
+  .node .name { overflow: hidden; text-overflow: ellipsis; }
+  .node .size { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .node.dir .name { font-weight: 550; }
+  .node.file .name { cursor: pointer; }
+
+  section.view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .pathbar {
+    padding: 11px 20px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: var(--panel);
+  }
+  .pathbar code { color: var(--ink); font-size: 13px; }
+  .pathbar .meta { margin-left: auto; font-variant-numeric: tabular-nums; }
+  #preview { flex: 1; overflow: auto; padding: 18px 20px 40px; }
+  #preview pre {
+    margin: 0;
+    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+  }
+  .hexline { display: flex; gap: 14px; }
+  .hexline .off { color: var(--muted); }
+  .hexline .bytes { color: var(--ink); }
+  .hexline .ascii { color: var(--muted); }
+  .empty { color: var(--muted); font-size: 13.5px; }
+  .err {
+    margin: 20px;
+    padding: 14px 16px;
+    border: 1px solid #e8c9b5;
+    background: #fdf3ec;
+    border-radius: 10px;
+    color: #7a3b12;
+    font-size: 13.5px;
+  }
+  footer {
+    padding: 10px 26px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    gap: 16px;
+    background: var(--panel);
+  }
+  footer .spacer { flex: 1; }
+  .spin { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>moonfs</h1>
+  <span class="tag">在浏览器里读 NTFS / ext4 磁盘镜像 · 纯 MoonBit，无服务器</span>
+  <span class="spacer"></span>
+  <a href="https://github.com/wwt1733/moonfs" target="_blank" rel="noreferrer">GitHub ↗</a>
+</header>
+
+<main>
+  <div id="landing">
+    <div id="drop">
+      <h2>把磁盘镜像拖进来</h2>
+      <p>裸卷、MBR、GPT 都行。文件不上传——解析全在这个页面里完成。</p>
+      <div class="row">
+        <button class="primary" id="pick">选择镜像…</button>
+        <button id="s-ntfs">看 NTFS 示例（22 KB）</button>
+        <button id="s-ext4">看 ext4 示例（16 MB，压缩传输）</button>
+      </div>
+      <div class="hint">支持 .img / .dd / .vhd 的裸字节内容；支持 NTFS 3.1 与 ext4（extents / htree 目录）</div>
+      <input type="file" id="file" hidden>
+    </div>
+  </div>
+
+  <div id="work">
+    <aside>
+      <div class="volbar">
+        <span id="vol-label">卷</span>
+        <select id="vol"></select>
+        <button id="close" title="关闭">×</button>
+      </div>
+      <div id="tree"></div>
+    </aside>
+    <section class="view">
+      <div class="pathbar">
+        <code id="p-path">/</code>
+        <span id="p-kind"></span>
+        <span class="meta" id="p-meta"></span>
+      </div>
+      <div id="preview"><div class="empty">左边点一个文件</div></div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <span>解析器编译成 JS，在本地跑；镜像不出浏览器。</span>
+  <span class="spacer"></span>
+  <span id="stat"></span>
+</footer>
+
+<script src="samples.js"></script>
+<script src="api.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const state = { bytes: null, vols: [], vol: 0, sel: null };
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function fmtSize(n) {
+    if (n === undefined || n === null) return "";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KiB";
+    if (n < 1024 * 1024 * 1024) return (n / 1048576).toFixed(1) + " MiB";
+    return (n / 1073741824).toFixed(2) + " GiB";
+  }
+
+  function apiReady() {
+    return typeof globalThis.moonfsDescribe === "function";
+  }
+
+  function fail(msg) {
+    $("preview").innerHTML = "";
+    $("preview").appendChild(el("div", "err", msg));
+  }
+
+  // ---- 打开镜像 ----
+  function open(bytes, label) {
+    if (!apiReady()) {
+      fail("解析器没加载成功（api.js）。如果是直接双击打开的，请把三个文件放在同一目录。");
+      return;
+    }
+    state.bytes = bytes;
+    $("landing").style.display = "none";
+    $("work").classList.add("on");
+    $("stat").textContent = label ? label + " · " + fmtSize(bytes.length) : fmtSize(bytes.length);
+
+    const t0 = performance.now();
+    let d;
+    try {
+      d = JSON.parse(globalThis.moonfsDescribe(bytes));
+    } catch (e) {
+      fail("解析器抛异常：" + e.message);
+      return;
+    }
+    const ms = Math.round(performance.now() - t0);
+    $("stat").textContent += " · 探测 " + ms + " ms";
+
+    if (!d.ok) {
+      $("tree").innerHTML = "";
+      $("tree").appendChild(el("div", "empty", "没有卷"));
+      fail(d.error);
+      return;
+    }
+    state.vols = d.volumes;
+    state.vol = 0;
+    const sel = $("vol");
+    sel.innerHTML = "";
+    d.volumes.forEach((v, i) => {
+      const o = el("option", null, "#" + i + " " + v.fs.toUpperCase());
+      o.value = String(i);
+      sel.appendChild(o);
+    });
+    sel.style.display = d.volumes.length > 1 ? "" : "none";
+    $("vol-label").textContent = d.volumes.length > 1 ? "卷" : d.volumes[0].fs.toUpperCase();
+    sel.onchange = () => { state.vol = Number(sel.value); renderTree(); };
+    renderTree();
+  }
+
+  function renderTree() {
+    const v = state.vols[state.vol];
+    $("tree").innerHTML = "";
+    $("p-path").textContent = "/";
+    $("p-kind").textContent = v.label;
+    $("p-meta").textContent = "";
+    $("preview").innerHTML = "";
+    $("preview").appendChild(el("div", "empty", "左边点一个文件"));
+    const box = el("div");
+    $("tree").appendChild(box);
+    v.root.forEach((e) => box.appendChild(row(e, "/" + e.n, 0)));
+  }
+
+  function row(entry, path, depth) {
+    const n = document.createElement("button");
+    n.type = "button";
+    n.className = "node " + (entry.d ? "dir" : "file");
+    n.style.paddingLeft = (8 + depth * 14) + "px";
+    n.setAttribute("data-path", path);
+    const caret = el("span", "caret", entry.d ? "▸" : "");
+    n.appendChild(caret);
+    n.appendChild(el("span", "name", entry.n));
+    if (!entry.d) n.appendChild(el("span", "size", fmtSize(entry.s)));
+
+    if (entry.d) {
+      n.setAttribute("aria-expanded", "false");
+      caret.onclick = () => toggleDir(n, caret, path, depth);
+      n.onclick = (ev) => { if (ev.target !== caret) toggleDir(n, caret, path, depth); };
+    } else {
+      n.onclick = () => pickFile(n, path, entry);
+    }
+    n._path = path;
+    return n;
+  }
+
+  function toggleDir(node, caret, path, depth) {
+    if (node._open) {
+      node._open = false;
+      caret.textContent = "▸";
+      if (node._kids) node._kids.remove();
+      node._kids = null;
+      return;
+    }
+    const res = JSON.parse(globalThis.moonfsList(state.bytes, state.vol, path));
+    if (!res.ok) { fail(res.error); return; }
+    const kids = el("div");
+    if (res.entries.length === 0) {
+      kids.appendChild(el("div", "empty", "  (空)"));
+    }
+    res.entries
+      .slice()
+      .sort((a, b) => (b.d ? 1 : 0) - (a.d ? 1 : 0) || a.n.localeCompare(b.n))
+      .forEach((e) => kids.appendChild(row(e, path + "/" + e.n, depth + 1)));
+    node.after(kids);
+    node._kids = kids;
+    node._open = true;
+    caret.textContent = "▾";
+  }
+
+  function pickFile(node, path, entry) {
+    document.querySelectorAll(".node.sel").forEach((n) => n.classList.remove("sel"));
+    node.classList.add("sel");
+    $("p-path").textContent = path;
+    $("p-meta").textContent = fmtSize(entry.s);
+    const t0 = performance.now();
+    const res = JSON.parse(globalThis.moonfsRead(state.bytes, state.vol, path, 8192));
+    const ms = Math.round(performance.now() - t0);
+    if (!res.ok) { fail(res.error); return; }
+    $("p-kind").textContent = res.shown === res.size ? "完整内容" : "前 " + fmtSize(res.shown) + "，共 " + fmtSize(res.size);
+    $("p-meta").textContent = fmtSize(res.size) + " · 读 " + ms + " ms";
+    const pre = el("pre");
+    if (res.kind === "text") {
+      pre.textContent = res.data;
+    } else {
+      pre.innerHTML = hexHtml(res.data);
+    }
+    $("preview").innerHTML = "";
+    $("preview").appendChild(pre);
+  }
+
+  // 十六进制：每行 16 字节，带偏移与 ASCII
+  function hexHtml(hex) {
+    const rows = [];
+    const per = 16;
+    for (let i = 0; i < hex.length; i += per * 2) {
+      const chunk = hex.slice(i, i + per * 2);
+      const parts = [];
+      let ascii = "";
+      for (let j = 0; j < chunk.length; j += 2) {
+        parts.push(chunk.slice(j, j + 2));
+        const b = parseInt(chunk.slice(j, j + 2), 16);
+        ascii += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".";
+      }
+      const off = (i / 2).toString(16).padStart(8, "0");
+      rows.push(
+        '<div class="hexline"><span class="off">' + off + '</span>' +
+        '<span class="bytes">' + parts.join(" ").padEnd(per * 3 - 1, " ") + '</span>' +
+        '<span class="ascii">' + ascii.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</span></div>'
+      );
+    }
+    return rows.join("");
+  }
+
+  // ---- 输入 ----
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hot"); })
+  );
+  ["dragleave", "drop"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hot"); })
+  );
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+  $("pick").onclick = () => $("file").click();
+  $("file").onchange = (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); };
+
+  function loadFile(f) {
+    const r = new FileReader();
+    r.onload = () => open(new Uint8Array(r.result), f.name);
+    r.readAsArrayBuffer(f);
+  }
+
+  $("close").onclick = () => {
+    state.bytes = null;
+    $("work").classList.remove("on");
+    $("landing").style.display = "";
+    $("stat").textContent = "";
+  };
+
+  // 内置示例：NTFS 是原样 base64，ext4 是 gzip 后 base64（16 MB 压到几十 KB）
+  function fromBase64(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  $("s-ntfs").onclick = () => {
+    if (!window.SAMPLES) { fail("samples.js 没加载"); return; }
+    open(fromBase64(window.SAMPLES.ntfs), "synth-ntfs.img");
+  };
+
+  $("s-ext4").onclick = async () => {
+    if (!window.SAMPLES) { fail("samples.js 没加载"); return; }
+    if (typeof DecompressionStream !== "function") {
+      fail("这个浏览器不支持 DecompressionStream，请直接拖入 testdata/ext4.img");
+      return;
+    }
+    const gz = fromBase64(window.SAMPLES.ext4gz);
+    const stream = new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"));
+    const buf = await new Response(stream).arrayBuffer();
+    open(new Uint8Array(buf), "ext4.img");
+  };
+
+  // #ntfs / #ext4 直接进示例，方便分享与截图
+  const hash = location.hash.replace("#", "");
+  if (hash === "ntfs") setTimeout(() => $("s-ntfs").click(), 0);
+  if (hash === "ext4") setTimeout(() => $("s-ext4").click(), 0);
+})();
+</script>
+</body>
+</html>

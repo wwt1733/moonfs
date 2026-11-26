@@ -10,6 +10,8 @@
 moon add wwt1733/moonfs
 ```
 
+**在浏览器里试：** <https://wwt1733.github.io/moonfs/> —— 把镜像拖进去就能看目录树和十六进制，解析全部在这个页面里完成，文件不会上传。内置两个示例（NTFS 22 KB 原样、ext4 16 MB 以 gzip 传输）。
+
 从源码跑（含测试与两块测试镜像，能重放 `testdata/` 里的镜像）：
 
 ```
@@ -121,6 +123,7 @@ wsl -e bash tools/make_ext4_image.sh    # 或任意 Linux + e2fsprogs
 - **不做 EFS 解密。** 需要用户的证书与私钥，任何离线镜像解析器都拿不到，因此这是物理上不可行，而非实现偷懒。遇到加密属性返回 `Encrypted` 并带上路径，不返回密文冒充内容。
 - **不跟随重解析点。** 符号链接与目录联接的目标可能是 `\??\C:\Windows` 这种镜像之外的路径，跟过去等于凭空造出一条镜像里并不存在的路径。能读到的是链接本身：tag、substitute name、print name，原样交回调用方，由它决定要不要解释。
 - **不做 ext4 htree 的哈希查找。** 条目按 `rec_len` 线性扫描，htree 目录也一样走这条路径（已在 fixture 上验证）；不实现按哈希定位，慢但正确。
+- **镜像整块进内存。** `@block.Image` 是 `Bytes` 上的视图，没有分块读取：实践上限约几百 MB，够读分区镜像、U 盘镜像和教学样本，但整盘取证镜像（几十上百 GB）不适合。改成按需读取要把 `Image` 换成接口，代价见 README 之外的设计笔记——在浏览器里也拿不到同步随机读，所以那不是一句"加个窗口"能解决的。
 - **不做挂载、不做内核集成、不做写回缓存。**
 
 ## 使用
@@ -210,6 +213,13 @@ moon test
 moon test --target js
 moon test --target wasm-gc
 ```
+
+## 浏览器 demo
+
+`docs/demo/` 是个纯静态页面，没有服务端。`web/api` 只做三件事，把函数挂到 `globalThis` 上供页面调用：`moonfsDescribe`（探测卷 + 根目录）、`moonfsList`（列子目录）、`moonfsRead`（读文件头，文本或十六进制）。三个都是无状态的——每次调用都从字节重新解析，页面因此不会和解析器持有的中间状态产生分歧。
+
+- 产物：`bash tools/build_demo.sh`——编译 `web/api` 到 JS、拷进 `docs/demo/`、把两块示例镜像塞进 `samples.js`
+- 命令行复核：`node tools/demo_smoke.js` 用 node 跑**同一份** JS 产物，断言三块镜像的卷、目录与内容；CI 里连着跑，页面要是坏了构建就红
 
 ## 验证方式
 

@@ -1,0 +1,14 @@
+import {
+  "wwt1733/moonfs/src/binio",
+  "wwt1733/moonfs/src/block",
+  "wwt1733/moonfs/src/partition",
+  "wwt1733/moonfs/src/ntfs",
+  "wwt1733/moonfs/src/ext4",
+  "moonbitlang/core/encoding/utf8",
+}
+
+pkgtype(kind: "executable")
+
+options(
+  supported_targets: "js",
+)
