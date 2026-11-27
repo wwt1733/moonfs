@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 允许在不动代码的情况下重跑：工具链是每次安装最新的，
+  # 换版本可能悄悄把构建弄红，得能立刻验一次。
+  workflow_dispatch:
 
 jobs:
   check-and-test:
